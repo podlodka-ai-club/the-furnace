@@ -1,4 +1,4 @@
-# my-project
+# the-furnace
 
 Autonomous coding agent system orchestrated via Temporal workflows. Linear ticket → failing tests (spec agent) → green tests (coder agent) → multi-persona review → auto-merge.
 

@@ -1,4 +1,4 @@
-# my-project
+# the-furnace
 
 Autonomous coding agent system orchestrated via Temporal workflows. Linear tickets → failing tests (spec agent) → green tests (coder agent) → multi-persona review → auto-merge with veto window.
 
@@ -46,7 +46,7 @@ openspec show foundation
 ## Project structure
 
 ```
-my-project/
+the-furnace/
 ├── server/              # Node backend (Express + Temporal worker)
 │   ├── src/
 │   └── tests/

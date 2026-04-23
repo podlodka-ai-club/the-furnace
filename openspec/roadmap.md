@@ -1,4 +1,4 @@
-# my-project — Implementation Roadmap
+# the-furnace — Implementation Roadmap
 
 > Track progress through the changes. Each change is implemented in order.
 > After completing a change, mark it done and start the next one.
