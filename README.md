@@ -25,11 +25,18 @@ cd server && npm install && cd ..
 # Start the dev server (tsx watch)
 npm run dev
 
+# Start local Temporal + UI (required for Temporal smoke tests)
+docker compose up -d temporal temporal-ui
+
+# Start Temporal worker in a second terminal
+npm run --prefix server temporal:worker
+
 # Run tests
 npm test
 ```
 
 Dev server listens on port 3000. The `/health` endpoint is the first thing to land (see the `foundation` change).
+Temporal frontend is available at `localhost:7233`; Temporal UI is available at `http://localhost:8233`.
 
 ## Spec-driven workflow
 
