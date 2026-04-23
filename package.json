@@ -1,0 +1,14 @@
+{
+  "name": "my-project",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autonomous coding agent system orchestrated via Temporal workflows.",
+  "scripts": {
+    "dev": "npm run --prefix server dev",
+    "test": "npm run --prefix server test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

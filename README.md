@@ -1,0 +1,68 @@
+# my-project
+
+Autonomous coding agent system orchestrated via Temporal workflows. Linear tickets → failing tests (spec agent) → green tests (coder agent) → multi-persona review → auto-merge with veto window.
+
+See [`openspec/concept.md`](openspec/concept.md) for the full concept and [`openspec/roadmap.md`](openspec/roadmap.md) for the phased implementation plan.
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Runtime | Node.js + TypeScript (ESM) |
+| Orchestration | Temporal (added in `temporal-setup`) |
+| Agent framework | Claude Agent SDK (added with `spec-agent`/`coder-agent`) |
+| Database | PGLite for dev/test, PostgreSQL for prod |
+| Tests | Vitest (unit + Supertest integration) |
+| External integrations | Linear, GitHub, Slack |
+
+## Getting started
+
+```bash
+# Install workspace dependencies
+npm install
+cd server && npm install && cd ..
+
+# Start the dev server (tsx watch)
+npm run dev
+
+# Run tests
+npm test
+```
+
+Dev server listens on port 3000. The `/health` endpoint is the first thing to land (see the `foundation` change).
+
+## Spec-driven workflow
+
+Work is scoped as **changes** under `openspec/changes/<name>/`. Each change has a `proposal.md` describing why, what, and impact. Specs, design, and tasks are created during implementation via the OpenSpec `/opsx:*` slash commands.
+
+```bash
+# See all changes and their status
+openspec list
+
+# Start working on the first change
+openspec show foundation
+```
+
+## Project structure
+
+```
+my-project/
+├── server/              # Node backend (Express + Temporal worker)
+│   ├── src/
+│   └── tests/
+├── data/pglite/         # PGLite dev database (gitignored)
+├── openspec/
+│   ├── concept.md       # Full design concept
+│   ├── roadmap.md       # Phased change list
+│   └── changes/         # One directory per change with proposal.md
+├── CLAUDE.md            # Agent instructions
+├── AGENTS.md            # AI agent conventions
+└── TESTING.md           # Test strategy and commands
+```
+
+## Learn more
+
+- [`openspec/concept.md`](openspec/concept.md) — full architecture and principles
+- [`openspec/roadmap.md`](openspec/roadmap.md) — implementation order
+- [`CLAUDE.md`](CLAUDE.md) — how to work in this repo with Claude
+- [`TESTING.md`](TESTING.md) — test tiers and commands
