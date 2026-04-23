@@ -122,14 +122,19 @@ The system SHALL allow `createApp({ db }: { db: Database })` to mount the databa
 
 ### Requirement: Dev data directory is persisted under `data/pglite/`
 
-The system SHALL use `data/pglite/` as the default dev `dataDir` when `server/src/index.ts` runs without `DATABASE_URL`. The repository SHALL contain `data/pglite/.gitkeep` and SHALL gitignore the rest of that directory.
+The system SHALL persist the dev database under `data/pglite/` when `server/src/index.ts` runs without `DATABASE_URL`. Specifically, `server/src/index.ts` SHALL pass `data/pglite/pgdata` as the PGLite `dataDir`: PGLite's `initdb` refuses to run in a non-empty directory, so the data files live one level deeper than the tracked `.gitkeep`. The repository SHALL contain `data/pglite/.gitkeep` and SHALL gitignore the rest of that directory (covering `data/pglite/pgdata/` via the existing `data/pglite/*` rule).
 
 #### Scenario: Dev run persists data across restarts
 
 - **WHEN** `npm run dev` starts, a row is inserted into `tickets`, the process is stopped, and `npm run dev` is started again
 - **THEN** the previously inserted row is still present on the second boot
 
+#### Scenario: PGLite data lives in `data/pglite/pgdata/`
+
+- **WHEN** `npm run dev` boots with no `DATABASE_URL`
+- **THEN** PGLite initializes its cluster under `data/pglite/pgdata/` (creating `PG_VERSION`, `base/`, etc. there), and the parent `data/pglite/` directory continues to contain the tracked `.gitkeep`
+
 #### Scenario: data/pglite is gitignored except for .gitkeep
 
-- **WHEN** `git status --ignored` is run after PGLite has written files under `data/pglite/`
-- **THEN** the PGLite files are listed as ignored, `data/pglite/.gitkeep` remains tracked, and no other file under `data/pglite/` appears in tracked changes
+- **WHEN** `git status --ignored` is run after PGLite has written files under `data/pglite/pgdata/`
+- **THEN** the PGLite files (including the `pgdata/` subdirectory) are listed as ignored, `data/pglite/.gitkeep` remains tracked, and no other file under `data/pglite/` appears in tracked changes
