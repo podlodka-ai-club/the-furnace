@@ -11,7 +11,7 @@ Concept §2 specifies content-addressed tool-output storage plus structured comm
   - `put(bytes, metadata): Promise<hash>` — writes the blob, records a row in the `provenance` table with workflow metadata.
   - `get(hash): Promise<{ bytes, metadata }>` — read-through by hash.
   - `listByWorkflow(workflowId): Promise<ProvenanceRecord[]>` — used by future "why did you do that?" queries.
-- Wire each agent activity (spec, coder, reviewers) to put every tool output through the store, tagged with `{ workflowId, model, ticketId, attemptIndex, kind }`.
+- Wire each agent activity (spec, coder, review) to put every tool output through the store, tagged with `{ workflowId, model, ticketId, attemptIndex, kind }`.
 - Store returns the hash; the hash is included in commit trailers so every merged commit points at its provenance record.
 
 ## Capabilities
@@ -22,8 +22,8 @@ Concept §2 specifies content-addressed tool-output storage plus structured comm
 
 ### Modified Capabilities
 
-- `spec-generation`, `code-generation`, `multi-persona-review`: Each tool output is written through the store before being consumed downstream.
-- `github-pr-lifecycle`: Commit trailers now include a `Provenance-Hash:` field.
+- `spec-generation`, `code-generation`, `single-review`: Each tool output is written through the store before being consumed downstream.
+- `github-pr-open`: Commit trailers now include a `Provenance-Hash:` field.
 
 ## Impact
 
