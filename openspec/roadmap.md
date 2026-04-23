@@ -8,7 +8,7 @@
 ## Phase 1: Foundation
 
 - [x] `foundation` — Project structure, dev tooling, health check endpoint
-- [ ] `data-model` — PGLite schema and migrations for workflow runs, tickets, attempts, reviews
+- [x] `data-model` — PGLite schema and migrations for workflow runs, tickets, attempts, reviews
 
 > **Milestone:** `npm run dev` starts a TypeScript server; `/health` returns 200; database tables exist.
 
