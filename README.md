@@ -1,6 +1,6 @@
 # the-furnace
 
-Autonomous coding agent system orchestrated via Temporal workflows. Linear tickets → failing tests (spec agent) → green tests (coder agent) → multi-persona review → auto-merge with veto window.
+Autonomous coding agent system orchestrated via Temporal workflows. Linear tickets -> failing tests (spec agent) -> green tests (coder agent) -> single reviewer verdict -> open PR.
 
 See [`openspec/concept.md`](openspec/concept.md) for the full concept and [`openspec/roadmap.md`](openspec/roadmap.md) for the phased implementation plan.
 
@@ -25,11 +25,19 @@ cd server && npm install && cd ..
 # Start the dev server (tsx watch)
 npm run dev
 
+# Start local Temporal + UI (required for Temporal smoke tests)
+docker compose up -d temporal temporal-ui
+
+# Start Temporal worker in a second terminal
+npm run --prefix server temporal:worker
+
 # Run tests
 npm test
 ```
 
 Dev server listens on port 3000. The `/health` endpoint is the first thing to land (see the `foundation` change).
+Temporal frontend is available at `localhost:7233` (gRPC API for SDK/client/worker traffic; not a browser page).
+Temporal UI is available at `http://localhost:8233` (human web interface).
 
 ## Spec-driven workflow
 

@@ -7,6 +7,7 @@
 | `npm test` | Server unit + integration tests (Vitest) |
 | `cd server && npx vitest` | Watch mode from the server package |
 | `cd server && npx vitest run tests/integration` | Just integration tests |
+| `docker compose up -d temporal temporal-ui` | Starts local Temporal services for smoke workflow tests |
 
 ## Tiers
 
@@ -14,7 +15,7 @@
 |---|---|---|---|
 | Unit | Vitest | `server/tests/*.test.ts` | Pure-function coverage, no I/O |
 | Integration | Vitest + Supertest | `server/tests/integration/*.test.ts` | Hits the Express app factory + PGLite directly |
-| Workflow | Temporal test env | `server/tests/workflows/*.test.ts` | Spins up a local Temporal instance (added with `temporal-setup`) |
+| Workflow | Temporal + Vitest | `server/tests/integration/temporal.*.test.ts` | Requires local Temporal services on `localhost:7233` |
 
 There is no end-to-end test tier — this project has no user-facing frontend. Human-visible behavior runs through Linear, GitHub, and Slack, all covered by integration tests that stub those APIs at the HTTP layer.
 
@@ -28,14 +29,14 @@ There is no end-to-end test tier — this project has no user-facing frontend. H
 ## Environment variables for isolation
 
 - `PGLITE_DATA_DIR` — override the default `data/pglite/` path during tests.
-- `TEMPORAL_TASK_QUEUE` — set to a unique value per test run to avoid cross-test task-claim races.
+- `TEMPORAL_TASK_QUEUE` — override default queue name (`the-furnace`) for isolated workflow runs.
 - `.env.test` (gitignored) — test-only overrides.
 
 ## Adding a new test
 
 1. Place unit tests alongside the code under `server/tests/` mirroring the `server/src/` tree.
 2. Integration tests go in `server/tests/integration/` and import the app factory from `server/src/app.ts`.
-3. For workflow tests, use the Temporal test environment (added in the `temporal-setup` change); do not hit a real Temporal server.
+3. For workflow tests, start local Temporal services first with `docker compose up -d temporal temporal-ui`.
 
 ## What NOT to mock
 
