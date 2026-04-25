@@ -12,6 +12,7 @@ import type {
   SpecPhaseOutput,
 } from "../../agents/contracts/index.js";
 import type * as phaseActivities from "../activities/phases.js";
+import type * as linearActivities from "../activities/linear.js";
 import type * as workflowRunActivities from "../activities/workflow-runs.js";
 
 export const PER_TICKET_WORKFLOW_NAME = "perTicketWorkflow";
@@ -51,6 +52,16 @@ const {
   startToCloseTimeout: "1 minute",
 });
 
+const { syncLinearTicketStateActivity } = proxyActivities<typeof linearActivities>({
+  startToCloseTimeout: "1 minute",
+  retry: {
+    initialInterval: "1 second",
+    backoffCoefficient: 2,
+    maximumInterval: "30 seconds",
+    maximumAttempts: 5,
+  },
+});
+
 export async function perTicketWorkflow(
   input: PerTicketWorkflowInput,
 ): Promise<PerTicketWorkflowResult> {
@@ -67,6 +78,10 @@ export async function perTicketWorkflow(
   await persistWorkflowRunStart({
     workflowId: workflowInfo().workflowId,
     ticket: input.ticket,
+  });
+  await syncLinearTicketStateActivity({
+    ticketId: input.ticket.id,
+    stateName: "In Progress",
   });
 
   const specOutput = await runPhase("spec", () => runSpecPhase({ ticket: input.ticket }));
@@ -89,6 +104,10 @@ export async function perTicketWorkflow(
   }
 
   currentPhase = "completed";
+  await syncLinearTicketStateActivity({
+    ticketId: input.ticket.id,
+    stateName: "Done",
+  });
   await persistWorkflowRunTransition({
     workflowId: workflowInfo().workflowId,
     status: "succeeded",
@@ -97,11 +116,7 @@ export async function perTicketWorkflow(
 
   async function runPhase<T>(phase: "spec" | "coder" | "review", fn: () => Promise<T>): Promise<T | null> {
     if (cancelled) {
-      currentPhase = "cancelled";
-      await persistWorkflowRunTransition({
-        workflowId: workflowInfo().workflowId,
-        status: "cancelled",
-      });
+      await transitionToCancelled();
       return null;
     }
 
@@ -114,15 +129,23 @@ export async function perTicketWorkflow(
     const output = await fn();
 
     if (cancelled) {
-      currentPhase = "cancelled";
-      await persistWorkflowRunTransition({
-        workflowId: workflowInfo().workflowId,
-        status: "cancelled",
-      });
+      await transitionToCancelled();
       return null;
     }
 
     return output;
+  }
+
+  async function transitionToCancelled(): Promise<void> {
+    currentPhase = "cancelled";
+    await syncLinearTicketStateActivity({
+      ticketId: input.ticket.id,
+      stateName: "Canceled",
+    });
+    await persistWorkflowRunTransition({
+      workflowId: workflowInfo().workflowId,
+      status: "cancelled",
+    });
   }
 }
 

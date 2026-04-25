@@ -12,6 +12,7 @@ import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
 import * as workflowRunActivities from "./activities/workflow-runs.js";
 import type { SpecPhaseInput } from "./activities/phases.js";
+import type { SyncLinearTicketStateInput } from "./activities/linear.js";
 import type {
   PersistWorkflowRunStartInput,
   PersistWorkflowRunTransitionInput,
@@ -26,6 +27,7 @@ import {
 export interface TemporalWorkerActivities {
   helloActivity(name: string): Promise<string>;
   listAgentReadyTicketsActivity(): Promise<Ticket[]>;
+  syncLinearTicketStateActivity(input: SyncLinearTicketStateInput): Promise<void>;
   runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput>;
   runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput>;
   runReviewPhase(input: ReviewerInput): Promise<ReviewResult>;

@@ -32,6 +32,9 @@ There is no end-to-end test tier — this project has no user-facing frontend. H
 - `TEMPORAL_TASK_QUEUE` — override default queue name (`the-furnace`) for isolated workflow runs.
 - `LINEAR_API_KEY` — required for Linear client initialization.
 - `LINEAR_TEAM_ID` — required team context for Linear ticket queries/mutations.
+- `LINEAR_STATE_ID_IN_PROGRESS` — target Linear workflow state id for ticket start transitions.
+- `LINEAR_STATE_ID_DONE` — target Linear workflow state id for successful terminal transitions.
+- `LINEAR_STATE_ID_CANCELED` — target Linear workflow state id for cancel terminal transitions.
 - `.env.test` (gitignored) — test-only overrides.
 
 ## Adding a new test

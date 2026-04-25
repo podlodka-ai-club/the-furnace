@@ -62,6 +62,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
         reasoning: "ok",
         findings: [],
       }),
+      syncLinearTicketStateActivity: async (_input) => {},
       persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
       persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
     };
@@ -96,6 +97,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
     const ticketId = `issue-${randomUUID()}`;
+    const syncedStateNames: string[] = [];
     let releaseSpec: (() => void) | undefined;
     const specGate = new Promise<void>((resolve) => {
       releaseSpec = resolve;
@@ -136,6 +138,9 @@ describe("Temporal per-ticket workflow orchestration", () => {
         reasoning: "ok",
         findings: [],
       }),
+      syncLinearTicketStateActivity: async (input) => {
+        syncedStateNames.push(input.stateName);
+      },
       persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
       persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
     };
@@ -162,12 +167,15 @@ describe("Temporal per-ticket workflow orchestration", () => {
       releaseSpec?.();
       await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
     });
+
+    expect(syncedStateNames).toEqual(["In Progress", "Done"]);
   }, 30_000);
 
   it("runs phases in order, supports cancel signal, and answers queries", async () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
     const phaseCalls: string[] = [];
+    const syncedStateNames: string[] = [];
     let releaseSpec: (() => void) | undefined;
     const specGate = new Promise<void>((resolve) => {
       releaseSpec = resolve;
@@ -207,6 +215,9 @@ describe("Temporal per-ticket workflow orchestration", () => {
           findings: [],
         };
       },
+      syncLinearTicketStateActivity: async (input) => {
+        syncedStateNames.push(input.stateName);
+      },
       persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
       persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
     };
@@ -241,6 +252,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     });
 
     expect(phaseCalls).toEqual(["spec"]);
+    expect(syncedStateNames).toEqual(["In Progress", "Canceled"]);
   }, 30_000);
 });
 

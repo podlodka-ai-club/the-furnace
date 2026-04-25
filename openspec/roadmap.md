@@ -18,7 +18,7 @@
 - [x] `linear-integration` — Linear API client: read `agent-ready` tickets, create typed clarification sub-tickets
 - [x] `agent-io-contracts` — Zod schemas and inferred TS types for inter-agent boundaries (spec/coder/review outputs), validated at phase-activity borders
 - [x] `per-ticket-workflow` — Cron workflow polling Linear; per-ticket Temporal workflow with spec → code → review phases (as no-op activities initially)
-- [ ] `ticket-state-sync` — Sync Linear ticket state (`In Progress`/`Done`/`Canceled`) from per-ticket workflow lifecycle
+- [x] `ticket-state-sync` — Sync Linear ticket state (`In Progress`/`Done`/`Canceled`) from per-ticket workflow lifecycle
 
 > **Milestone:** Cron picks up an `agent-ready` ticket, spawns a workflow, and runs through three no-op phases durably.
 

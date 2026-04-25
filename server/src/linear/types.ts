@@ -24,6 +24,11 @@ export interface PostedComment {
   id: string;
 }
 
+export interface UpdateIssueStateInput {
+  ticketId: string;
+  stateId: string;
+}
+
 export interface LinearClientApi {
   listAgentReadyTickets(): Promise<Ticket[]>;
   createSubTicket(
@@ -33,4 +38,5 @@ export interface LinearClientApi {
     workflowDeepLink: string,
   ): Promise<CreatedSubTicket>;
   postComment(ticketId: string, body: string): Promise<PostedComment>;
+  updateIssueState(ticketId: string, stateId: string): Promise<void>;
 }

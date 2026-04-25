@@ -28,6 +28,9 @@ cp server/.env.example server/.env
 # Required values in server/.env
 LINEAR_API_KEY=lin_api_xxx
 LINEAR_TEAM_ID=team_xxx
+LINEAR_STATE_ID_IN_PROGRESS=state_xxx
+LINEAR_STATE_ID_DONE=state_xxx
+LINEAR_STATE_ID_CANCELED=state_xxx
 
 # Start the dev server (tsx watch)
 npm run dev
@@ -45,6 +48,8 @@ npm test
 Dev server listens on port 3000. The `/health` endpoint is the first thing to land (see the `foundation` change).
 Temporal frontend is available at `localhost:7233` (gRPC API for SDK/client/worker traffic; not a browser page).
 Temporal UI is available at `http://localhost:8233` (human web interface).
+
+Per-ticket workflow state sync to Linear uses a Temporal activity with retry policy: initial interval `1s`, backoff `2x`, maximum interval `30s`, and maximum attempts `5`. If retries are exhausted, the workflow transition fails and remains visible for operator intervention.
 
 ## Spec-driven workflow
 
