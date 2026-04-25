@@ -231,6 +231,40 @@ describe("Linear client integration", () => {
     expect(comment).toEqual({ id: "comment_1" });
   });
 
+  it("updates issue state mutation with provided issue and state ids", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
+      const body = parseBody(init);
+      expect(body).toMatchObject({
+        query: expect.stringContaining("issueUpdate"),
+        variables: {
+          id: "issue_abc",
+          input: {
+            stateId: "state_in_progress",
+          },
+        },
+      });
+
+      return jsonResponse({
+        data: {
+          issueUpdate: {
+            success: true,
+          },
+        },
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createLinearClient({
+      apiKey: "lin_api_key",
+      teamId: "team_123",
+      apiUrl: "https://linear.example/graphql",
+    });
+
+    await expect(client.updateIssueState("issue_abc", "state_in_progress")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("exports a client API that is importable by activities", async () => {
     const api = await import("../../src/linear/client.js");
 

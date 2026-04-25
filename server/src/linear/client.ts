@@ -72,6 +72,14 @@ const POST_COMMENT_MUTATION = `
   }
 `;
 
+const UPDATE_ISSUE_STATE_MUTATION = `
+  mutation UpdateIssueState($id: String!, $input: IssueUpdateInput!) {
+    issueUpdate(id: $id, input: $input) {
+      success
+    }
+  }
+`;
+
 interface ListAgentReadyTicketsResponse {
   issues: {
     nodes: Array<{
@@ -105,6 +113,12 @@ interface PostCommentResponse {
     comment: {
       id: string;
     } | null;
+  };
+}
+
+interface UpdateIssueStateResponse {
+  issueUpdate: {
+    success: boolean;
   };
 }
 
@@ -221,6 +235,26 @@ export function createLinearClient(options: CreateLinearClientOptions = {}): Lin
         return { id: comment.id };
       } catch (error) {
         throw new Error("Linear postComment failed", { cause: error });
+      }
+    },
+
+    async updateIssueState(ticketId: string, stateId: string): Promise<void> {
+      try {
+        const response = await sdk.client.rawRequest<
+          UpdateIssueStateResponse,
+          { id: string; input: { stateId: string } }
+        >(UPDATE_ISSUE_STATE_MUTATION, {
+          id: ticketId,
+          input: {
+            stateId,
+          },
+        });
+
+        if (response.data?.issueUpdate.success !== true) {
+          throw new Error("Linear issueUpdate did not report success");
+        }
+      } catch (error) {
+        throw new Error("Linear updateIssueState failed", { cause: error });
       }
     },
   };

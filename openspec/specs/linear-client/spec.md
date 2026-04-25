@@ -39,6 +39,20 @@ The system SHALL expose `postComment(ticketId, body)` and submit a Linear commen
 - **WHEN** `postComment(ticketId, body)` is invoked with a valid ticket id
 - **THEN** the client sends a comment create mutation referencing that ticket id and resolves after Linear acknowledges creation
 
+### Requirement: Linear client updates issue state with typed inputs
+
+The system SHALL expose `updateIssueState(ticketId, stateId): Promise<void>` and submit a Linear issue update mutation that sets `stateId` for the target `ticketId`.
+
+#### Scenario: Issue state update mutation uses provided ids
+
+- **WHEN** `updateIssueState(ticketId, stateId)` is invoked with valid ids
+- **THEN** the client MUST send a Linear issue update mutation referencing exactly the provided `ticketId` and `stateId`
+
+#### Scenario: Mutation acknowledgement resolves call
+
+- **WHEN** Linear acknowledges successful issue state update
+- **THEN** `updateIssueState(ticketId, stateId)` MUST resolve without throwing
+
 ### Requirement: Linear configuration is validated at initialization
 
 The system SHALL require `LINEAR_API_KEY` and `LINEAR_TEAM_ID` from environment configuration before client operations execute, and SHALL fail fast with a descriptive error when either value is missing.
@@ -66,3 +80,8 @@ The system SHALL include integration tests in `server/tests/integration/linear.t
 
 - **WHEN** the integration test intercepts outbound HTTP for `createSubTicket`
 - **THEN** it asserts the mutation payload includes parent id, typed label, and deep-link-enriched body, and verifies response mapping succeeds
+
+#### Scenario: updateIssueState validates mutation wire contract
+
+- **WHEN** the integration test intercepts outbound HTTP for `updateIssueState`
+- **THEN** it asserts the mutation operation shape includes issue id and state id variables before returning a stubbed success response
