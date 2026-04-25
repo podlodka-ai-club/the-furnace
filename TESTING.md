@@ -30,6 +30,8 @@ There is no end-to-end test tier — this project has no user-facing frontend. H
 
 - `PGLITE_DATA_DIR` — override the default `data/pglite/` path during tests.
 - `TEMPORAL_TASK_QUEUE` — override default queue name (`the-furnace`) for isolated workflow runs.
+- `LINEAR_API_KEY` — required for Linear client initialization.
+- `LINEAR_TEAM_ID` — required team context for Linear ticket queries/mutations.
 - `.env.test` (gitignored) — test-only overrides.
 
 ## Adding a new test

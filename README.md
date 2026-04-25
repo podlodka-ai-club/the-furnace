@@ -22,6 +22,13 @@ See [`openspec/concept.md`](openspec/concept.md) for the full concept and [`open
 npm install
 cd server && npm install && cd ..
 
+# Configure local env (required for Linear integration)
+cp server/.env.example server/.env
+
+# Required values in server/.env
+LINEAR_API_KEY=lin_api_xxx
+LINEAR_TEAM_ID=team_xxx
+
 # Start the dev server (tsx watch)
 npm run dev
 

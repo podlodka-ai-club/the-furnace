@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.0",
+    "@linear/sdk": "^82.1.0",
     "@temporalio/activity": "^1.16.1",
     "@temporalio/client": "^1.16.1",
     "@temporalio/worker": "^1.16.1",
