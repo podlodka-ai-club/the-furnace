@@ -22,6 +22,7 @@ export interface SpecPhaseInput {
 
 export async function runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput> {
   const validatedInput = specPhaseInputSchema.parse(input);
+  console.info("runSpecPhase noop", { ticketId: validatedInput.ticket.id });
 
   const output = {
     featureBranch: `agent/spec-${validatedInput.ticket.identifier.toLowerCase()}`,
@@ -39,6 +40,7 @@ export async function runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutp
 
 export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput> {
   const validatedInput = specPhaseOutputSchema.parse(input);
+  console.info("runCoderPhase noop", { featureBranch: validatedInput.featureBranch });
 
   const output = {
     featureBranch: validatedInput.featureBranch,
@@ -61,6 +63,7 @@ export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseO
 
 export async function runReviewPhase(input: ReviewerInput): Promise<ReviewResult> {
   const validatedInput = reviewerInputSchema.parse(input);
+  console.info("runReviewPhase noop", { ticketId: validatedInput.ticket.id });
 
   const output = {
     verdict: "approve" as const,

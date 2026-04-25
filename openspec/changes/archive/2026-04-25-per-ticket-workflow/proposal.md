@@ -4,7 +4,7 @@ Concept §2 specifies one Temporal workflow per Linear ticket with phase-level a
 
 ## What Changes
 
-- Add a Temporal cron workflow (`LinearPollerWorkflow`) running on a short interval that calls `listAgentReadyTickets` and enqueues a `PerTicketWorkflow` for each new ticket (idempotent via ticket ID).
+- Add a Temporal cron workflow (`LinearPollerWorkflow`) running on a short interval that calls `listAgentReadyTickets` for tickets labeled `agent-ready` in Linear `Todo` state and enqueues a `PerTicketWorkflow` for each new ticket (idempotent via ticket ID).
 - Add `PerTicketWorkflow` composed of three phase-level activities invoked in order: `runSpecPhase`, `runCoderPhase`, `runReviewPhase` (each a no-op that logs and returns success).
 - Add workflow signals: `cancel`.
 - Add workflow queries: `currentPhase`, `attemptCount` for Temporal UI introspection.

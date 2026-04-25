@@ -122,6 +122,12 @@ describe("Linear client integration", () => {
     expect(capturedBodies[0]).toMatchObject({
       query: expect.stringContaining("agent-ready"),
     });
+    expect(capturedBodies[0]).toMatchObject({
+      query: expect.stringContaining('state: { name: { eq: "Todo" } }'),
+    });
+    expect(capturedBodies[0]).toMatchObject({
+      query: expect.stringContaining("($teamId: ID!, $after: String)"),
+    });
     expect(capturedBodies[1]).toMatchObject({
       variables: { after: "cursor_1", teamId: "team_123" },
     });
