@@ -23,11 +23,12 @@ const SUB_TICKET_TITLES: Record<SupportedSubTicketType, string> = {
 };
 
 const LIST_AGENT_READY_TICKETS_QUERY = `
-  query ListAgentReadyTickets($teamId: String!, $after: String) {
+  query ListAgentReadyTickets($teamId: ID!, $after: String) {
     issues(
       filter: {
         team: { id: { eq: $teamId } }
         labels: { name: { eq: "agent-ready" } }
+        state: { name: { eq: "Todo" } }
       }
       first: 50
       after: $after

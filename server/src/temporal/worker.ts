@@ -1,6 +1,21 @@
 import { fileURLToPath } from "node:url";
 import { NativeConnection, Worker } from "@temporalio/worker";
-import * as activities from "./activities/hello.js";
+import type {
+  CoderPhaseOutput,
+  ReviewResult,
+  ReviewerInput,
+  SpecPhaseOutput,
+} from "../agents/contracts/index.js";
+import type { Ticket } from "../linear/types.js";
+import * as helloActivities from "./activities/hello.js";
+import * as linearActivities from "./activities/linear.js";
+import * as phaseActivities from "./activities/phases.js";
+import * as workflowRunActivities from "./activities/workflow-runs.js";
+import type { SpecPhaseInput } from "./activities/phases.js";
+import type {
+  PersistWorkflowRunStartInput,
+  PersistWorkflowRunTransitionInput,
+} from "./activities/workflow-runs.js";
 import {
   CLAUDE_ACTIVITY_CONCURRENCY,
   TEMPORAL_ADDRESS,
@@ -8,15 +23,38 @@ import {
   TEMPORAL_TASK_QUEUE,
 } from "./config.js";
 
-export async function createTemporalWorker(): Promise<Worker> {
+export interface TemporalWorkerActivities {
+  helloActivity(name: string): Promise<string>;
+  listAgentReadyTicketsActivity(): Promise<Ticket[]>;
+  runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput>;
+  runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput>;
+  runReviewPhase(input: ReviewerInput): Promise<ReviewResult>;
+  persistWorkflowRunStart(input: PersistWorkflowRunStartInput): Promise<void>;
+  persistWorkflowRunTransition(input: PersistWorkflowRunTransitionInput): Promise<void>;
+}
+
+const defaultActivities: TemporalWorkerActivities = {
+  ...helloActivities,
+  ...linearActivities,
+  ...phaseActivities,
+  ...workflowRunActivities,
+};
+
+export interface CreateTemporalWorkerOptions {
+  activities?: TemporalWorkerActivities;
+  workflowsPath?: string;
+}
+
+export async function createTemporalWorker(options: CreateTemporalWorkerOptions = {}): Promise<Worker> {
   try {
     const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS });
     return Worker.create({
-      activities,
+      activities: options.activities ?? defaultActivities,
       connection,
       namespace: TEMPORAL_NAMESPACE,
       taskQueue: TEMPORAL_TASK_QUEUE,
-      workflowsPath: fileURLToPath(new URL("./workflows/hello.ts", import.meta.url)),
+      workflowsPath:
+        options.workflowsPath ?? fileURLToPath(new URL("./workflows/index.ts", import.meta.url)),
       maxConcurrentActivityTaskExecutions: CLAUDE_ACTIVITY_CONCURRENCY,
     });
   } catch (error) {
