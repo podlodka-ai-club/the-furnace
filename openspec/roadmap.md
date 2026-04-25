@@ -15,7 +15,7 @@
 ## Phase 2: Temporal orchestration
 
 - [x] `temporal-setup` — Temporal client/worker bootstrap, local docker-compose, activity-level rate limiting for Claude SDK calls
-- [ ] `linear-integration` — Linear API client: read `agent-ready` tickets, create typed clarification sub-tickets
+- [x] `linear-integration` — Linear API client: read `agent-ready` tickets, create typed clarification sub-tickets
 - [ ] `agent-io-contracts` — Zod schemas and inferred TS types for inter-agent boundaries (spec/coder/review outputs), validated at phase-activity borders
 - [ ] `per-ticket-workflow` — Cron workflow polling Linear; per-ticket Temporal workflow with spec → code → review phases (as no-op activities initially)
 
