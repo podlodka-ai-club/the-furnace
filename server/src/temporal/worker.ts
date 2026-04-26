@@ -23,6 +23,8 @@ import {
   TEMPORAL_NAMESPACE,
   TEMPORAL_TASK_QUEUE,
 } from "./config.js";
+import { createTemporalClient } from "./client.js";
+import { ensureLinearPollerSchedule } from "./schedule.js";
 
 export interface TemporalWorkerActivities {
   helloActivity(name: string): Promise<string>;
@@ -68,6 +70,10 @@ export async function createTemporalWorker(options: CreateTemporalWorkerOptions 
 }
 
 export async function runTemporalWorker(): Promise<void> {
+  const client = await createTemporalClient();
+  const scheduleOutcome = await ensureLinearPollerSchedule(client.schedule);
+  console.log(`Linear poller schedule ${scheduleOutcome} (${TEMPORAL_TASK_QUEUE})`);
+
   const worker = await createTemporalWorker();
   await worker.run();
 }
