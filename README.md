@@ -51,6 +51,35 @@ Temporal UI is available at `http://localhost:8233` (human web interface).
 
 Per-ticket workflow state sync to Linear uses a Temporal activity with retry policy: initial interval `1s`, backoff `2x`, maximum interval `30s`, and maximum attempts `5`. If retries are exhausted, the workflow transition fails and remains visible for operator intervention.
 
+## Devcontainer image builds
+
+`devcontainer-images` adds a per-target-repo image build pipeline. Tracked repos live in `build/repos.json`; each entry's `slug` must equal the normalized `<owner>-<name>` value.
+
+Required environment variables:
+
+```bash
+DEVCONTAINER_REGISTRY_URL=ghcr.io/<owner-or-org>
+DEVCONTAINER_REGISTRY_TOKEN=registry_write_token
+TARGET_REPO_GITHUB_TOKEN=github_read_token_for_target_repos
+```
+
+Build commands:
+
+```bash
+# Build one repo at its current configured ref
+npm run build:devcontainer -- --repo <repo-slug>
+
+# Build one repo at an explicit commit
+npm run build:devcontainer -- --repo <repo-slug> --sha <commit-sha>
+
+# Poll tracked repos and build only missing/stale manifests
+npm run build:devcontainer -- --stale
+```
+
+Successful builds write `build/<repo-slug>/manifest.json` with the digest-pinned `imageRef` consumed by later runtime work. The alias tags `:sha-<commit>` and `:main` are for human discovery only.
+
+The GitHub Actions workflow commits generated manifest updates back to `main` with the default `GITHUB_TOKEN`. Repositories using protected `main` branches must allow GitHub Actions to push those generated manifest commits, or replace the commit-back step with a PR-opening flow before enabling the scheduled workflow.
+
 ## Spec-driven workflow
 
 Work is scoped as **changes** under `openspec/changes/<name>/`. Each change has a `proposal.md` describing why, what, and impact. Specs, design, and tasks are created during implementation via the OpenSpec `/opsx:*` slash commands.

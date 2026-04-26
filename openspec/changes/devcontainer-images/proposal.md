@@ -4,19 +4,20 @@ Concept §3.5: if the target repo already has a `devcontainer.json`, agents must
 
 ## What Changes
 
-- Add a `build/` directory with per-repo image build definitions (`build/<repo-slug>/Dockerfile` derived from that repo's `devcontainer.json`).
+- Add a `build/` directory with tracked-repo configuration (`build/repos.json`) and generated per-repo build manifests (`build/<repo-slug>/manifest.json`).
 - Add a build script (`scripts/build-devcontainer-image.ts`) that:
   - Reads the target repo's `devcontainer.json`.
-  - Produces a Dockerfile that extends the devcontainer base, clones the repo, and runs the repo's setup commands.
-  - Tags and pushes to the configured registry.
-- Add a GitHub Actions workflow at `.github/workflows/build-devcontainer-images.yml` that rebuilds images on main commits of tracked repos.
-- Add image registry configuration (URL + credentials) via env vars.
+  - Invokes the official devcontainer build path for the repo's image/build/features configuration.
+  - Adds the pinned source checkout and any explicit per-repo warmup command.
+  - Tags, pushes, and records a digest-pinned runtime image reference in the manifest.
+- Add a GitHub Actions workflow at `.github/workflows/build-devcontainer-images.yml` that polls tracked target repos for main-branch advances, supports manual rebuilds, and rebuilds images when pipeline inputs change.
+- Add image registry configuration and read-only target-repo GitHub access via env vars.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `devcontainer-image-build`: Per-repo image build pipeline derived from each repo's `devcontainer.json`, with pre-cloned source, pre-installed deps, and CI rebuild on main.
+- `devcontainer-image-build`: Per-repo image build pipeline derived from each repo's `devcontainer.json`, with pre-cloned source, optional explicit warmup, digest-pinned image manifests, and CI rebuild on tracked repo main advances.
 
 ### Modified Capabilities
 
@@ -24,7 +25,7 @@ Concept §3.5: if the target repo already has a `devcontainer.json`, agents must
 
 ## Impact
 
-- New files: `build/<repo-slug>/Dockerfile` (one per tracked repo), `scripts/build-devcontainer-image.ts`, `.github/workflows/build-devcontainer-images.yml`.
-- New env vars: `DEVCONTAINER_REGISTRY_URL`, `DEVCONTAINER_REGISTRY_TOKEN`.
+- New files: `build/repos.json`, `build/<repo-slug>/manifest.json` (generated per tracked repo), `scripts/build-devcontainer-image.ts`, `.github/workflows/build-devcontainer-images.yml`.
+- New env vars: `DEVCONTAINER_REGISTRY_URL`, `DEVCONTAINER_REGISTRY_TOKEN`, and `TARGET_REPO_GITHUB_TOKEN` for polling/cloning tracked target repos.
 - Image registry cost and retention policy are out of scope — covered later in `provenance-store` or ops docs.
 - MVP targets 1–2 demo repos per concept §4.

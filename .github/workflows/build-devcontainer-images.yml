@@ -1,0 +1,173 @@
+name: Build devcontainer images
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Optional tracked repo slug to build"
+        required: false
+        type: string
+      commitSha:
+        description: "Optional commit SHA when repo is provided"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/build-devcontainer-image.ts"
+      - "scripts/build/**"
+      - "build/repos.json"
+      # Generated build/<slug>/manifest.json files are intentionally excluded to prevent self-trigger loops.
+      - ".github/workflows/build-devcontainer-images.yml"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  scheduled-poll:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      DEVCONTAINER_REGISTRY_URL: ${{ vars.DEVCONTAINER_REGISTRY_URL }}
+      DEVCONTAINER_REGISTRY_TOKEN: ${{ secrets.DEVCONTAINER_REGISTRY_TOKEN }}
+      TARGET_REPO_GITHUB_TOKEN: ${{ secrets.TARGET_REPO_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: docker/setup-buildx-action@v3
+      - run: npm ci
+      - run: npm run build:devcontainer -- --stale
+      - name: Commit manifest updates
+        run: |
+          if git diff --quiet -- build; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build/*/manifest.json
+
+          node <<'NODE' > /tmp/devcontainer-manifest-commit-message
+          const { execSync } = require("node:child_process");
+          const fs = require("node:fs");
+          const files = execSync("git diff --cached --name-only -- build", { encoding: "utf8" })
+            .trim()
+            .split("\n")
+            .filter(Boolean);
+          const details = files.map((file) => {
+            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+            return `- ${manifest.repoSlug}: ${manifest.commitSha} ${manifest.imageDigest}`;
+          });
+          console.log(["chore(devcontainer-images): update image manifests", "", ...details].join("\n"));
+          NODE
+
+          git commit --file /tmp/devcontainer-manifest-commit-message
+          git push
+
+  rebuild-all:
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      DEVCONTAINER_REGISTRY_URL: ${{ vars.DEVCONTAINER_REGISTRY_URL }}
+      DEVCONTAINER_REGISTRY_TOKEN: ${{ secrets.DEVCONTAINER_REGISTRY_TOKEN }}
+      TARGET_REPO_GITHUB_TOKEN: ${{ secrets.TARGET_REPO_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: docker/setup-buildx-action@v3
+      - run: npm ci
+      - run: npm run build:devcontainer -- --all --use-manifest-sha
+      - name: Commit manifest updates
+        run: |
+          if git diff --quiet -- build; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build/*/manifest.json
+
+          node <<'NODE' > /tmp/devcontainer-manifest-commit-message
+          const { execSync } = require("node:child_process");
+          const fs = require("node:fs");
+          const files = execSync("git diff --cached --name-only -- build", { encoding: "utf8" })
+            .trim()
+            .split("\n")
+            .filter(Boolean);
+          const details = files.map((file) => {
+            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+            return `- ${manifest.repoSlug}: ${manifest.commitSha} ${manifest.imageDigest}`;
+          });
+          console.log(["chore(devcontainer-images): update image manifests", "", ...details].join("\n"));
+          NODE
+
+          git commit --file /tmp/devcontainer-manifest-commit-message
+          git push
+
+  manual-dispatch:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      DEVCONTAINER_REGISTRY_URL: ${{ vars.DEVCONTAINER_REGISTRY_URL }}
+      DEVCONTAINER_REGISTRY_TOKEN: ${{ secrets.DEVCONTAINER_REGISTRY_TOKEN }}
+      TARGET_REPO_GITHUB_TOKEN: ${{ secrets.TARGET_REPO_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: docker/setup-buildx-action@v3
+      - run: npm ci
+      - name: Build requested images
+        run: |
+          if [ -n "${{ inputs.repo }}" ]; then
+            args=(--repo "${{ inputs.repo }}")
+            if [ -n "${{ inputs.commitSha }}" ]; then
+              args+=(--sha "${{ inputs.commitSha }}")
+            fi
+            npm run build:devcontainer -- "${args[@]}"
+          else
+            npm run build:devcontainer -- --all
+          fi
+      - name: Commit manifest updates
+        run: |
+          if git diff --quiet -- build; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build/*/manifest.json
+
+          node <<'NODE' > /tmp/devcontainer-manifest-commit-message
+          const { execSync } = require("node:child_process");
+          const fs = require("node:fs");
+          const files = execSync("git diff --cached --name-only -- build", { encoding: "utf8" })
+            .trim()
+            .split("\n")
+            .filter(Boolean);
+          const details = files.map((file) => {
+            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+            return `- ${manifest.repoSlug}: ${manifest.commitSha} ${manifest.imageDigest}`;
+          });
+          console.log(["chore(devcontainer-images): update image manifests", "", ...details].join("\n"));
+          NODE
+
+          git commit --file /tmp/devcontainer-manifest-commit-message
+          git push
