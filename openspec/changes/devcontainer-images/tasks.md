@@ -66,3 +66,4 @@
 - [x] 10.2 Confirm `docker pull <imageRef>` resolves the image whose digest matches `manifest.json.imageDigest` exactly
 - [x] 10.3 Run a one-off `docker run --rm <imageRef>` command (e.g., `ls <workspacePath>`) and confirm the cloned source is present at the recorded workspace path
 - [x] 10.4 Inspect the image and confirm no `/opt/furnace/` content exists and the image's `CMD` is the value set by the devcontainer base layer
+- [x] 10.5 Add `npm run test:devcontainer:e2e` to automate the local registry, demo SHA resolution, build, digest pull, and workspace smoke check

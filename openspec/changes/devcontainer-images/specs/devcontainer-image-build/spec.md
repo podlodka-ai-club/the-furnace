@@ -165,6 +165,15 @@ The build workflow SHALL expose a `workflow_dispatch` trigger that requires a `r
 - **WHEN** a maintainer runs `npm run build:devcontainer -- --repo acme-app --sha abc123…` locally with valid registry env vars
 - **THEN** the resulting `manifest.json` has the same shape and field set as the CI-produced manifest for the same inputs
 
+### Requirement: Local demo E2E helper supplies safe local defaults
+
+The project SHALL provide a local demo E2E helper that starts or reuses a local Docker registry, resolves the demo repo's current commit SHA, supplies local-only environment defaults, runs the same build script path, pulls the result by digest, and verifies the workspace checkout inside the image. The helper SHALL clearly identify the generated localhost manifest as local test output.
+
+#### Scenario: Demo E2E runs without manual env exports
+
+- **WHEN** a developer runs `npm run test:devcontainer:e2e`
+- **THEN** the helper uses `localhost:5001/the-furnace`, a local registry token, and the public demo repo SHA to build and verify the image without requiring the developer to paste manual `export` commands
+
 ### Requirement: Producer contract is image plus manifest; worker launch is out of scope
 
 This change SHALL produce only the digest-pinned environment image and its manifest. This change SHALL NOT bake any the-furnace runtime code (including but not limited to `worker-entry.ts`), set a furnace-specific image `CMD`, define mount contracts beyond what `devcontainer build` embeds, or prescribe how the image is launched at attempt time. Worker launch, mounts, environment, and lifecycle handling at runtime are owned by `container-as-worker`.

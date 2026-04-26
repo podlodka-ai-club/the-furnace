@@ -8,6 +8,7 @@
 | `cd server && npx vitest` | Watch mode from the server package |
 | `cd server && npx vitest run tests/integration` | Just integration tests |
 | `npm run build:devcontainer -- --repo <slug>` | Registry-backed devcontainer image build for one tracked repo |
+| `npm run test:devcontainer:e2e` | Local registry E2E for the demo devcontainer image |
 | `docker compose up -d temporal temporal-ui` | Starts local Temporal services for smoke workflow tests |
 
 ## Tiers

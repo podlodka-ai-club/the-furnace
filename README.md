@@ -71,9 +71,14 @@ npm run build:devcontainer -- --repo <repo-slug>
 
 # Build one repo at an explicit commit
 npm run build:devcontainer -- --repo <repo-slug> --sha <commit-sha>
+
+# Run the local demo E2E against a local Docker registry
+npm run test:devcontainer:e2e
 ```
 
 Successful builds write `build/<repo-slug>/manifest.json` with the digest-pinned `imageRef` consumed by later runtime work. The alias tags `:sha-<commit>` and `:main` are for human discovery only. For MVP, image builds are intended to be run on demand when the Linear-driven orchestrator picks up a ticket and resolves the target repo/ref to an exact commit SHA.
+
+The local E2E helper starts or reuses `furnace-local-registry-5001`, resolves the demo repo's current SHA, supplies local-only env defaults, builds the image, pulls it by digest, and runs a container smoke check. It writes a localhost manifest under `build/<repo-slug>/manifest.json`; treat that file as local test output.
 
 The GitHub Actions workflow is a manual `workflow_dispatch` entry point for rebuilds and debugging. It commits generated manifest updates back to `main` with the default `GITHUB_TOKEN`. Repositories using protected `main` branches must allow GitHub Actions to push those generated manifest commits, or replace the commit-back step with a PR-opening flow before using the workflow.
 
