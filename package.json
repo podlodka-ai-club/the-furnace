@@ -5,10 +5,16 @@
   "description": "Autonomous coding agent system orchestrated via Temporal workflows.",
   "scripts": {
     "dev": "npm run --prefix server dev",
-    "test": "npm run --prefix server test"
+    "build:devcontainer": "tsx scripts/build-devcontainer-image.ts",
+    "test": "npm run --prefix server test && npm run test:devcontainer",
+    "test:devcontainer": "npm run --prefix server test -- --root .. tests/devcontainer-image-build.test.ts",
+    "test:devcontainer:e2e": "tsx scripts/test-devcontainer-image-e2e.ts"
   },
   "devDependencies": {
+    "@devcontainers/cli": "0.85.0",
     "@types/node": "^22.0.0",
+    "jsonc-parser": "3.3.1",
+    "tsx": "4.21.0",
     "typescript": "^5.7.0"
   }
 }

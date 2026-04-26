@@ -4,16 +4,18 @@
 
 | Command | What it runs |
 |---|---|
-| `npm test` | Server unit + integration tests (Vitest) |
+| `npm test` | Server unit + integration tests, then root devcontainer build-script tests (Vitest) |
 | `cd server && npx vitest` | Watch mode from the server package |
 | `cd server && npx vitest run tests/integration` | Just integration tests |
+| `npm run build:devcontainer -- --repo <slug>` | Registry-backed devcontainer image build for one tracked repo |
+| `npm run test:devcontainer:e2e` | Local registry E2E for the demo devcontainer image |
 | `docker compose up -d temporal temporal-ui` | Starts local Temporal services for smoke workflow tests |
 
 ## Tiers
 
 | Tier | Tool | Location | Notes |
 |---|---|---|---|
-| Unit | Vitest | `server/tests/*.test.ts` | Pure-function coverage, no I/O |
+| Unit | Vitest | `server/tests/*.test.ts`, `tests/*.test.ts` | Pure-function coverage, no I/O |
 | Integration | Vitest + Supertest | `server/tests/integration/*.test.ts` | Hits the Express app factory + PGLite directly |
 | Workflow | Temporal + Vitest | `server/tests/integration/temporal.*.test.ts` | Requires local Temporal services on `localhost:7233` |
 
@@ -37,12 +39,16 @@ There is no end-to-end test tier — this project has no user-facing frontend. H
 - `LINEAR_STATE_ID_DONE` — target Linear workflow state id for successful terminal transitions.
 - `LINEAR_STATE_ID_CANCELED` — target Linear workflow state id for cancel terminal transitions.
 - `.env.test` (gitignored) — test-only overrides.
+- `DEVCONTAINER_REGISTRY_URL` — registry namespace for pre-warmed devcontainer images.
+- `DEVCONTAINER_REGISTRY_TOKEN` — registry write/pull token for devcontainer image builds.
+- `TARGET_REPO_GITHUB_TOKEN` — read-only GitHub token used to resolve refs and clone tracked target repos.
 
 ## Adding a new test
 
-1. Place unit tests alongside the code under `server/tests/` mirroring the `server/src/` tree.
-2. Integration tests go in `server/tests/integration/` and import the app factory from `server/src/app.ts`.
-3. For workflow tests, start local Temporal services first with `docker compose up -d temporal temporal-ui`.
+1. Place server unit tests alongside the code under `server/tests/` mirroring the `server/src/` tree.
+2. Place root tooling tests, such as build-script tests, under `tests/`.
+3. Integration tests go in `server/tests/integration/` and import the app factory from `server/src/app.ts`.
+4. For workflow tests, start local Temporal services first with `docker compose up -d temporal temporal-ui`.
 
 ## What NOT to mock
 

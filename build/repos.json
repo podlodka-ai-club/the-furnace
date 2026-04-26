@@ -1,0 +1,11 @@
+[
+  {
+    "slug": "microsoft-vscode-remote-try-node",
+    "owner": "microsoft",
+    "name": "vscode-remote-try-node",
+    "ref": "main",
+    "devcontainerPath": ".devcontainer/devcontainer.json",
+    "workspacePath": "/workspaces/vscode-remote-try-node",
+    "warmupCommand": "npm ci"
+  }
+]
