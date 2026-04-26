@@ -4,10 +4,10 @@ Phase 3 of the roadmap is gated on this change: `container-as-worker` boots from
 
 The proposal sketches a per-repo image build pipeline, build script, CI workflow, and registry env vars. Earlier review passes flagged devcontainer parity, repo revision pinning, registry contract, runtime digest pinning, prewarming policy honesty, and target-repo trigger semantics; this design addresses those. A subsequent review pass exposed two further gaps that this revision pins down before we write specs:
 
-1. **The push-rebuild trigger can self-trigger via its own manifest commits.** The previous draft included `build/**` in the rebuild path filter *and* committed `build/<slug>/manifest.json` back to `main` after each successful build. That is a feedback loop: a successful build commits a manifest, the manifest path matches the trigger, the workflow fires again, rebuilds (idempotently or not), commits again. The trigger filter must explicitly distinguish *inputs* (cause a rebuild) from *outputs* (must not).
+1. **Background repo polling is not needed for MVP.** The orchestrator starts work from Linear tickets, not from target-repo pushes. Building images just-in-time when a ticket is picked up keeps image production tied to actual agent work and avoids a cron workflow that rebuilds repos with no pending tickets.
 2. **The boundary with `container-as-worker` was overreaching.** A previous draft made this change bake `worker-entry.ts` into every per-repo image and set it as CMD, but `worker-entry.ts` is owned by the later `container-as-worker` change and does not exist yet. This change must stop at producing digest-pinned target-repo environment images plus manifests; `container-as-worker` owns worker launch/wrapping.
 
-This revision tightens Decision 4's path filter and adds Decision 6 to make the producer/consumer boundary explicit without depending on future worker-entry implementation.
+This revision makes Decision 4 an on-demand trigger model and adds Decision 6 to make the producer/consumer boundary explicit without depending on future worker-entry implementation.
 
 ## Goals / Non-Goals
 
@@ -16,7 +16,7 @@ This revision tightens Decision 4's path filter and adds Decision 6 to make the 
 - Make runtime image identity content-addressed (by digest) end-to-end, so workflow attempts cannot observe drift even if a tag is later repointed.
 - State the MVP prewarming policy honestly: what is baked into the image, what is not baked, and the trade-offs that follow.
 - Define a single, explicit registry contract — naming, tags, digest, auth, discovery — that `container-as-worker` consumes and the build pipeline produces.
-- Define an explicit, pull-based trigger model that detects new commits on each tracked target repo's `main` and rebuilds without requiring webhooks or any installation in the target repo, and that does *not* self-trigger via its own outputs.
+- Define an explicit on-demand trigger model: the Linear-driven orchestrator resolves the target repo/ref to a concrete commit SHA at ticket pickup time, then builds the image for that SHA if it is missing.
 - Define an explicit producer contract so `container-as-worker` can consume the image later without this change owning worker launch.
 - Support 1–2 demo repos initially, with a build script that scales to additional repos by adding a config entry — not by editing pipeline code.
 - Keep the MVP local-buildable and CI-buildable from the same script; no GitHub-Actions-only divergence.
@@ -30,7 +30,8 @@ This revision tightens Decision 4's path filter and adds Decision 6 to make the 
 - Sub-second cold-start as a hard MVP target (see Decision 1 — explicit downgrade with rationale).
 - Baking `devcontainer.json` lifecycle commands (`onCreateCommand`, `updateContentCommand`, `postCreateCommand`, `postStartCommand`) into the image. The image's parity claim is bounded to what `devcontainer build` covers (image / build / dockerfile / features) plus an explicit warmup command. Runtime handling of lifecycle commands, if any, belongs to `container-as-worker` or later V1+ work.
 - Creating, bundling, mounting, or launching `worker-entry.ts`. That is owned by `container-as-worker`.
-- Installing any workflow or webhook into target repos — the agent system is a passive observer of their `main`.
+- Installing any workflow or webhook into target repos.
+- Background polling or scheduled prewarming of target repos for commits with no active agent work.
 
 ## Decisions
 
@@ -81,55 +82,41 @@ The build script captures the digest emitted by the registry on push (e.g., `doc
 - **Alias tags published alongside (Decision 2):** `:sha-${COMMIT_SHA}` and `:main`. Aliases only — never substituted for the digest at runtime.
 - **`REPO_SLUG`:** lowercased `<owner>-<repo>`; non-`[a-z0-9-]` characters replaced with `-`; collisions are explicit build errors (no silent truncation).
 - **Auth:** bearer token in `DEVCONTAINER_REGISTRY_TOKEN`; registry host in `DEVCONTAINER_REGISTRY_URL`. Both are required at build time and at pull time. No anonymous pulls in MVP.
-- **Build manifest:** every successful build writes `build/<repo-slug>/manifest.json` containing `{repoSlug, owner, name, ref, commitSha, imageDigest, imageRef, aliasTags: ["sha-${SHA}", "main"], builtAt, devcontainerCliVersion, warmupCommand}`. `imageRef` is the digest reference (the runtime contract); `aliasTags` are documented for human use only. Committed back to main by the CI workflow on rebuild — see Decision 4.
-- **Discovery flow:** trigger pipeline (Decision 4) → reads target repo's main HEAD → if changed, builds and updates `build/<repo-slug>/manifest.json` with the new digest. Per-ticket workflow start → reads `manifest.json` for the repo at workflow-start time → freezes `imageRef` (digest reference) into workflow input → `container-as-worker` reads workflow input and pulls `imageRef` exactly as given.
+- **Build manifest:** every successful build writes `build/<repo-slug>/manifest.json` containing `{repoSlug, owner, name, ref, commitSha, imageDigest, imageRef, aliasTags: ["sha-${SHA}", "main"], builtAt, devcontainerCliVersion, warmupCommand}`. `imageRef` is the digest reference (the runtime contract); `aliasTags` are documented for human use only. Manual CI rebuilds commit the manifest back to main for auditability — see Decision 4.
+- **Discovery flow:** Linear poller picks up an agent-ready ticket → orchestrator resolves the target repo/ref (default `main`) to a concrete commit SHA → orchestrator asks the build primitive for an image at that repo/SHA if no suitable manifest/cache entry exists → workflow input freezes `imageRef` (digest reference) → `container-as-worker` reads workflow input and pulls `imageRef` exactly as given.
 
 **Rationale:** The contract surface is one file (`manifest.json`) plus two env vars. The producer (build script) writes it; the consumer (`container-as-worker` via workflow input) reads it. Neither side reconstructs the reference from string conventions. Adding the digest as the contract field — not the tag — closes the runtime-identity gap from Decision 2 at the contract level, not just at the pull-time level.
 
 **Alternatives considered:**
 - **Manifest carries only the tag, expect consumer to resolve digest at pull:** rejected; pushes resolution responsibility to the worker and reintroduces a TOCTOU window per-pull.
 - **Worker constructs reference by string concatenation:** rejected; couples worker to slug and tag rules that should be free to evolve.
-- **Query registry for current digest at workflow-start:** rejected; needs registry-list perms, adds a network dependency to cron polling, and the manifest is already authoritative.
+- **Query registry for current digest at workflow-start:** rejected; needs registry-list perms and makes the orchestrator reconstruct image identity instead of consuming the manifest contract.
 
-### 4) Trigger pipeline: a scheduled poller in the-furnace detects target-repo `main` advances; pipeline-self-changes trigger a full rebuild
+### 4) Trigger model: build on demand from Linear ticket processing; keep manual workflow dispatch for debugging
 
-**Decision:** Three trigger paths, all running in `.github/workflows/build-devcontainer-images.yml` in the-furnace repo. Target repos are not modified; no webhooks installed.
+**Decision:** This change exposes a single build primitive: `npm run build:devcontainer -- --repo <slug> [--sha <commitSha>]`. If `--sha` is omitted, the script resolves the repo's configured `ref` (default `main`) to the current commit SHA via the GitHub API before building.
 
-1. **Scheduled poll (primary trigger for target-repo changes).** A scheduled GitHub Actions workflow (e.g., `cron: */15 * * * *`) iterates every entry in `build/repos.json` and, for each, calls `GET /repos/{owner}/{name}/commits/{ref}` (default `ref: main`) via the GitHub API to read the current main HEAD SHA. If the returned SHA differs from `commitSha` in `build/<repo-slug>/manifest.json`, the workflow runs the build script for that repo. This is the pull model the concept already commits to (§6: "Pull model is simpler — no public endpoint, no webhook secrets"). Latency between a target-repo merge and a rebuild is bounded by the cron interval. The poll reads `TARGET_REPO_GITHUB_TOKEN`, a fine-grained PAT or GitHub App token with read-only access to the tracked repos; the same token is also passed to the build script for the source checkout. The workflow and build script fail before building or pushing if the token is missing or unauthorized, and they never write the token to manifests or logs.
+The MVP orchestrator model is just-in-time:
 
-2. **Pipeline self-change (rebuild-all trigger).** `on.push.branches: [main]` with an *inputs-only* `paths` filter that explicitly excludes the workflow's own outputs:
+1. Linear poller finds an `agent-ready` ticket.
+2. The orchestrator identifies the target repo and base ref for that ticket; for MVP, the ref defaults to the repo's configured `ref` in `build/repos.json`.
+3. The orchestrator resolves that ref to an exact commit SHA and checks whether an image/manifest for that repo/SHA already exists.
+4. If missing, the orchestrator runs the build primitive for that repo/SHA, records the digest-pinned `imageRef`, and starts the agent from that digest.
 
-   ```yaml
-   paths:
-     - scripts/build-devcontainer-image.ts
-     - scripts/build/**           # any build-helper TS modules
-     - build/repos.json           # the only input file under build/
-     - .github/workflows/build-devcontainer-images.yml
-     - package.json
-     - package-lock.json
-   ```
+The GitHub Actions workflow is only a manual `workflow_dispatch` escape hatch for rebuilds, debugging, and demo setup. It requires `repo` and accepts optional `commitSha`; it invokes the same build script and commits the updated `build/<repo-slug>/manifest.json` back to `main` for auditability. There is no scheduled poller and no push-triggered rebuild-all in MVP.
 
-   `build/<slug>/manifest.json` files are *deliberately omitted*. They are produced by this same workflow and committed back to `main` after every successful build (see "After every successful build…" below); including `build/**` would create a self-trigger loop where each manifest commit fires another rebuild. The rule is structural: this trigger names *causes of staleness* (script, deps, config, workflow YAML), never *records of build results*.
-
-   This trigger fires a rebuild of every tracked repo at its current pinned `commitSha`, catching the "build pipeline changed; previously valid images may now be stale relative to the new pipeline" case (e.g., we bumped `@devcontainers/cli` or changed warmup logic).
-
-3. **Manual dispatch (escape hatch).** `on.workflow_dispatch` with optional inputs (`repo`, `commitSha`) for force-rebuilds and bring-up of new repos. The same `scripts/build-devcontainer-image.ts` script is also runnable locally via `npm run build:devcontainer -- --repo <slug> [--sha <sha>]`.
-
-After every successful build, the workflow commits the updated `build/<repo-slug>/manifest.json` back to `main` so the manifest is always coherent with what was pushed to the registry. The commit message records the target repo, slug, commit SHA, and digest for auditability. Because the path filter (above) excludes `build/<slug>/manifest.json`, this commit does not re-trigger the workflow. Defense in depth: the rebuild-all job additionally guards with `if: github.actor != 'github-actions[bot]'` so even an accidental future widening of the path filter cannot reintroduce the loop silently.
-
-**Rationale:** The previous draft said "rebuild on each push to main that touches the target repo," which silently assumed the-furnace and the target repo are the same repo. They aren't. Fixing this requires either (a) installing a workflow/webhook in every target repo (rejected by §6 and by the "don't modify target repos" constraint), or (b) polling target repos from the-furnace. Polling matches the rest of the system (Linear is also polled, per §2). The cron interval is the only operationally tunable knob and is acceptable for MVP given that a 15-minute lag between merge and image rebuild is well below the cycle time of any human review pass that consumes the image.
+**Rationale:** The system's real work starts from Linear tickets. Rebuilding images on a cron when target repos move forward creates background operational noise, registry churn, and branch-protection questions for repos with no pending agent work. Building just-in-time ties the image to the exact ticket/run that needs it. The trade-off is first-ticket latency after a repo changes; acceptable for MVP and much easier to reason about.
 
 **Alternatives considered:**
-- **`repository_dispatch` from each target repo to the-furnace:** rejected; requires installing a workflow in every target repo and managing a dispatch token there, violating "no modifications to target repos."
-- **GitHub webhook receiver in the-furnace:** rejected; needs a public endpoint and webhook secret management per §6.
-- **Reuse the existing Linear cron workflow to also poll target repos:** rejected; mixes concerns. Image-rebuild cadence and Linear-polling cadence have different right answers and different failure modes.
-- **Per-push watching via a long-running daemon:** rejected; the-furnace has no production deployment yet, and GitHub Actions cron is sufficient.
-- **Use `paths-ignore: ["build/*/manifest.json"]` instead of an inputs-only `paths` allowlist:** rejected; allowlists fail safe (a new file under `build/` does not silently start triggering rebuilds) where ignore-lists fail open. The inputs-only allowlist makes the "what causes a rebuild" set explicit and reviewable.
-- **Drop the auto-commit and require humans to commit manifest updates:** rejected; manifest is an output, not a curated artifact. Hand-committing creates a window where the registry has a new digest but the manifest still points at the old one — the contract surface goes stale.
+- **Scheduled target-repo polling:** rejected for MVP; it prebuilds images independent of actual Linear work and adds cron/API/commit-back complexity.
+- **`repository_dispatch` from each target repo to the-furnace:** rejected; requires installing a workflow in every target repo and managing a dispatch token there.
+- **GitHub webhook receiver in the-furnace:** rejected; needs a public endpoint and webhook secret management.
+- **Pipeline self-change rebuild-all:** rejected for MVP; if the build pipeline changes, a maintainer can manually dispatch a rebuild, and later orchestration can invalidate cache keys using builder-version metadata.
+- **Drop the manual workflow and use local builds only:** rejected; a CI path is useful for demo setup and registry-backed rebuilds without requiring a developer machine.
 
 ### 5) Tracked repos live in `build/repos.json`, not hardcoded in the script
 
-**Decision:** A single `build/repos.json` file lists every tracked repo: `[{slug, owner, name, ref: "main", devcontainerPath?: ".devcontainer/devcontainer.json", workspacePath?: "/workspaces/acme-app", warmupCommand?: "npm ci"}]`. The build script, the scheduled poll workflow, and the pipeline-self-change workflow all read this file. Adding a new repo is a one-line PR.
+**Decision:** A single `build/repos.json` file lists every tracked repo: `[{slug, owner, name, ref: "main", devcontainerPath?: ".devcontainer/devcontainer.json", workspacePath?: "/workspaces/acme-app", warmupCommand?: "npm ci"}]`. The build script, the manual workflow, and later orchestrator integration all read this file. Adding a new repo is a one-line PR.
 
 **Rationale:** Concept §4 calls for 1–2 demo repos for MVP, growing afterward. Embedding the list in the script means every new repo is a code change with review surface; embedding it in CI YAML duplicates state. A small JSON registry is the lowest-friction extension point and cleanly separates "what we track" from "how we build." `warmupCommand` is per-repo so each tracked repo opts in to its own warmup, consistent with Decision 1. `workspacePath?` exists because `devcontainer.json.workspaceFolder` is itself optional in the upstream spec — without an override and a deterministic fallback chain (`repos.json[].workspacePath` → `devcontainer.json.workspaceFolder` → `/workspaces/<name>`), repos that omit `workspaceFolder` would have undefined warmup-target behavior. The resolved absolute path is recorded in `manifest.json` so consumers don't re-derive it.
 
@@ -160,9 +147,7 @@ The price is that this design no longer decides exactly how attempts are launche
 
 - **[Risk] A tracked repo's `devcontainer.json` lifecycle commands (e.g., `postCreateCommand`) are not baked into the image — agent runs against an incomplete environment if downstream runtime does not compensate** → Mitigation: this is the explicit Decisions 1 + 6 gap. The repo's `warmupCommand` in `repos.json` is the opt-in lever to replicate dependency setup that can safely run at build time. Curation criterion for the tracked-repo list: every tracked repo's lifecycle commands are either replicated by `warmupCommand`, confirmed unnecessary for the agent task, or explicitly left for `container-as-worker` runtime handling.
 
-- **[Risk] Cron polling latency means an `agent-ready` ticket that lands right after a target-repo merge runs against the previous image** → Mitigation: bounded by the cron interval (default 15 min). For demo time, the interval can be tightened; for production, GitHub Actions supports down to ~5 min in practice. If a specific demo run needs fresh-merge bytes, `workflow_dispatch` is the manual path. The system is honest about this latency rather than hiding it behind eventual consistency.
-
-- **[Risk] Cron polling rate-limits against GitHub API** → Mitigation: at MVP scale (1–2 repos, every 15 min) this is well under any GitHub limit. Manifest comparison is a single `commits/{ref}` call per tracked repo, not a list.
+- **[Risk] First ticket after a target-repo change waits for an image build** → Mitigation: accepted for MVP. The orchestrator can surface "building environment image" as run state, and `workflow_dispatch` remains available for demo prep.
 
 - **[Risk] Manifest.json drift between branches** → Mitigation: the workflow commits manifest updates only to `main`; non-main branches do not consume the manifest at runtime. If a developer hand-edits manifest.json on a feature branch, it has no runtime effect until merged.
 
@@ -185,7 +170,7 @@ The price is that this design no longer decides exactly how attempts are launche
 1. Add `@devcontainers/cli` to `package.json` (devDependency), pinned.
 2. Add `build/repos.json` with the initial 1–2 demo repos and `build/<slug>/` placeholder directories.
 3. Add `scripts/build-devcontainer-image.ts`:
-   - Requires `TARGET_REPO_GITHUB_TOKEN` for GitHub API polling and target-repo clone access.
+   - Requires `TARGET_REPO_GITHUB_TOKEN` for GitHub API ref resolution and target-repo clone access.
    - Clones target repo at the requested SHA (default: current main HEAD via GitHub API).
    - Invokes `devcontainer build` against the checkout to produce the base.
    - Resolves and records the container workspace path.
@@ -194,7 +179,7 @@ The price is that this design no longer decides exactly how attempts are launche
    - Publishes `:sha-${SHA}` and `:main` alias tags.
    - Writes `build/<repo-slug>/manifest.json` including `imageDigest`.
 4. Add `npm run build:devcontainer` script wiring.
-5. Add `.github/workflows/build-devcontainer-images.yml` with three triggers from Decision 4 (scheduled poll, push paths, manual dispatch). Includes a step that commits manifest changes back to main on success.
+5. Add `.github/workflows/build-devcontainer-images.yml` with the manual dispatch trigger from Decision 4. Includes a step that commits manifest changes back to main on success.
 6. Document the registry contract — including the digest-based runtime ref — in `specs/devcontainer-image-build/spec.md` so `container-as-worker` references it as the contract surface.
 7. Validate by running the script locally for one demo repo and confirming: (a) the resulting image has the repo cloned at the pinned SHA, (b) `docker pull <imageRef>` resolves via digest from the manifest, (c) the manifest's `imageDigest` matches the registry digest exactly, (d) a simple command can run inside the image to inspect the checked-out repo.
 
@@ -204,7 +189,5 @@ Rollback strategy: this change is additive — no existing module depends on it 
 
 - Which registry do we use for MVP — GHCR, an internal registry, or a vendor (ECR/GAR)? Affects auth wiring (OIDC vs. token) but not the contract shape. Defaulting to GHCR with `DEVCONTAINER_REGISTRY_TOKEN = GITHUB_TOKEN` for MVP unless someone speaks up.
 - For repos whose `devcontainer.json` references private base images, where do those credentials live? Likely the same registry token, but worth confirming against the demo-repo shortlist.
-- What's the right cron interval for the scheduled poll? 15 min is a safe default; demo-day prep may want 5 min. Tunable via the workflow YAML, no code change.
-- For a target repo, does the cron poll watch only `main`, or should it follow whatever ref is configured per-repo in `repos.json`? Defaulting to `main` for MVP.
 - Should the build script run a smoke test inside the freshly built image (e.g., `docker run` the image and `git rev-parse HEAD` to confirm the pinned source) before publishing? Adds CI minutes but catches "image builds clean but is broken." Lean toward yes; defer the exact gate to tasks.
-- Should the workflow always use `GITHUB_TOKEN` for committing manifest updates to the-furnace and reserve `TARGET_REPO_GITHUB_TOKEN` strictly for read-only target-repo polling/cloning?
+- Should the workflow always use `GITHUB_TOKEN` for committing manifest updates to the-furnace and reserve `TARGET_REPO_GITHUB_TOKEN` strictly for read-only target-repo ref resolution/cloning?

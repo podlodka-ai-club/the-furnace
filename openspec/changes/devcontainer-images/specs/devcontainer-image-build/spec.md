@@ -79,11 +79,11 @@ Every successful build SHALL also publish two human-readable alias tags pointing
 
 ### Requirement: Build manifest is the producer/consumer contract surface
 
-Every successful build SHALL write `build/<repo-slug>/manifest.json` with at minimum the fields `repoSlug`, `commitSha`, `imageDigest`, `imageRef`, `aliasTags`, `builtAt`, `workspacePath`, `devcontainerCliVersion`, and `warmupCommand`. The CI workflow SHALL commit the updated manifest back to the-furnace's `main` branch on every successful build so the manifest is always coherent with the registry state. The manifest SHALL NOT contain any registry credential or token value.
+Every successful build SHALL write `build/<repo-slug>/manifest.json` with at minimum the fields `repoSlug`, `commitSha`, `imageDigest`, `imageRef`, `aliasTags`, `builtAt`, `workspacePath`, `devcontainerCliVersion`, and `warmupCommand`. The manual CI workflow SHALL commit the updated manifest back to the-furnace's `main` branch on successful workflow-dispatch builds so the manifest is auditable alongside the registry state. The manifest SHALL NOT contain any registry credential or token value.
 
-#### Scenario: Manifest is committed back to main on success
+#### Scenario: Manual workflow commits manifest back to main on success
 
-- **WHEN** a CI build completes successfully and pushes the image
+- **WHEN** a manually-dispatched CI build completes successfully and pushes the image
 - **THEN** the workflow commits the updated `build/<repo-slug>/manifest.json` to the-furnace's `main` branch in a commit authored by `github-actions[bot]` whose message references the slug, target commit SHA, and digest
 
 #### Scenario: Manifest excludes credentials
@@ -102,16 +102,16 @@ The build pipeline and any downstream consumer SHALL read the registry host from
 
 ### Requirement: Target repo GitHub access is supplied via a fixed read token
 
-The scheduled poll workflow and build script SHALL read target-repo GitHub API and clone credentials from `TARGET_REPO_GITHUB_TOKEN`. The token SHALL have read-only access to every tracked target repo in `build/repos.json`. The workflow and build script SHALL fail before image build or push if the token is missing, cannot read a tracked repo's configured ref, or cannot clone the target source at the selected commit. The token SHALL NOT be written to `manifest.json` or logged.
+The build script and manual workflow SHALL read target-repo GitHub API and clone credentials from `TARGET_REPO_GITHUB_TOKEN`. The token SHALL have read-only access to every tracked target repo in `build/repos.json`. The workflow and build script SHALL fail before image build or push if the token is missing, cannot read a tracked repo's configured ref, or cannot clone the target source at the selected commit. The token SHALL NOT be written to `manifest.json` or logged.
 
 #### Scenario: Missing target repo token fails fast
 
-- **WHEN** the scheduled poll workflow or build script needs to poll or clone a tracked target repo and `TARGET_REPO_GITHUB_TOKEN` is unset
+- **WHEN** the build script or manual workflow needs to resolve a ref or clone a tracked target repo and `TARGET_REPO_GITHUB_TOKEN` is unset
 - **THEN** it exits with a non-zero status and an error naming `TARGET_REPO_GITHUB_TOKEN`, before any image build or push work runs
 
 #### Scenario: Unauthorized target repo access fails without publishing
 
-- **WHEN** GitHub API polling or source clone returns unauthorized or not-found for a tracked repo
+- **WHEN** GitHub API ref resolution or source clone returns unauthorized or not-found for a tracked repo
 - **THEN** the workflow reports the configured repo slug and owner/name, exits with a non-zero status, and does not build or push an image for that repo
 
 ### Requirement: Repository slug normalization is deterministic and collision-safe
@@ -125,53 +125,35 @@ The build pipeline SHALL derive `REPO_SLUG` from a target repo's `<owner>/<name>
 
 ### Requirement: Tracked repos are listed in build/repos.json
 
-The set of tracked target repos SHALL be defined exclusively by entries in `build/repos.json`. The build script, scheduled poll workflow, and pipeline-self-change workflow SHALL all read this single file. Adding or removing a tracked repo SHALL NOT require editing the build script or workflow YAML.
+The set of tracked target repos SHALL be defined exclusively by entries in `build/repos.json`. The build script, manual workflow, and later orchestrator integration SHALL all read this single file. Adding or removing a tracked repo SHALL NOT require editing the build script or workflow YAML.
 
 #### Scenario: Adding a repo requires only a config change
 
 - **WHEN** a maintainer adds a new entry `{slug, owner, name}` to `build/repos.json` and merges it
-- **THEN** the next scheduled poll detects the new repo and the build pipeline produces an image and manifest for it without any code or workflow YAML changes
+- **THEN** the build script and manual workflow can build that repo by slug without any build-script code change
 
-### Requirement: Scheduled poll detects target-repo main advances
+### Requirement: Build is on demand for a tracked repo and commit SHA
 
-A scheduled GitHub Actions workflow SHALL run on a fixed cron, iterate every entry in `build/repos.json`, and read the current main HEAD SHA of each tracked repo via the GitHub API. For any repo whose returned SHA differs from `commitSha` in `build/<repo-slug>/manifest.json`, the workflow SHALL invoke the build script for that repo at the new SHA. Target repos SHALL NOT be required to install any workflow, webhook, or other modification.
+The build script SHALL expose an on-demand entry point `npm run build:devcontainer -- --repo <slug> [--sha <commitSha>]`. When `--sha` is provided, the build SHALL use that exact commit. When `--sha` is omitted, the build script SHALL resolve the repo's configured `ref` (default `main`) to an exact commit SHA via the GitHub API before cloning and building. The build script SHALL NOT expose scheduled-poll or rebuild-all modes in MVP.
 
-#### Scenario: New target-repo main commit triggers rebuild
+#### Scenario: Explicit SHA build uses the requested commit
 
-- **WHEN** a tracked target repo's main HEAD has advanced past the SHA recorded in its manifest at the time the cron fires
-- **THEN** the workflow runs the build script for that repo at the new SHA and publishes a new digest, leaving other tracked repos untouched
+- **WHEN** the build script runs with `--repo acme-app --sha abc123...`
+- **THEN** it clones `acme-app` at `abc123...`, builds the image from that source, and records `commitSha: "abc123..."` in the manifest
 
-#### Scenario: No target-repo change triggers no build
+#### Scenario: Ref build resolves current commit before building
 
-- **WHEN** all tracked repos' current main HEADs match their manifests at the time the cron fires
-- **THEN** the workflow exits without invoking the build script and without pushing any image
+- **WHEN** the build script runs with `--repo acme-app` and the tracked repo config has `ref: "main"`
+- **THEN** it resolves `main` to an exact commit SHA before clone/build and records that resolved SHA in the manifest
 
-### Requirement: Pipeline self-change triggers a rebuild-all using an inputs-only path filter
+#### Scenario: Background rebuild modes are rejected
 
-The build workflow SHALL also trigger on push to the-furnace's `main` for an explicit allowlist of pipeline input paths only — the build script and any helper modules under `scripts/`, `build/repos.json`, the workflow YAML itself, and root dependency lockfiles. The path filter SHALL NOT include `build/<slug>/manifest.json` or any other generated output. When this trigger fires, the workflow SHALL rebuild every tracked repo at its currently pinned `commitSha`.
-
-#### Scenario: Pipeline-source change rebuilds all tracked repos
-
-- **WHEN** a commit on the-furnace's main modifies `scripts/build-devcontainer-image.ts`
-- **THEN** the workflow rebuilds an image for every entry in `build/repos.json` at its current pinned commit SHA
-
-#### Scenario: Manifest commits do not re-trigger the workflow
-
-- **WHEN** the workflow commits an updated `build/<repo-slug>/manifest.json` back to main as part of a successful build
-- **THEN** that commit does not match the rebuild-all path filter and does not trigger another workflow run
-
-### Requirement: Bot-authored commits are guarded against re-triggering rebuild-all
-
-As a defense-in-depth measure complementing the path filter, the rebuild-all job SHALL skip when the triggering push was authored by `github-actions[bot]`. This guard SHALL be in addition to, not in place of, the inputs-only path filter.
-
-#### Scenario: Bot manifest commit is skipped by the rebuild-all job
-
-- **WHEN** a push event reaches the workflow and the actor is `github-actions[bot]`
-- **THEN** the rebuild-all job evaluates its `if` guard to false and runs no build steps
+- **WHEN** the build script is invoked with `--stale`, `--all`, or `--use-manifest-sha`
+- **THEN** it exits with a non-zero status explaining that only `--repo <slug> [--sha <commitSha>]` is supported
 
 ### Requirement: Manual dispatch trigger and local script share one entry point
 
-The build workflow SHALL expose a `workflow_dispatch` trigger that accepts optional `repo` and `commitSha` inputs and invokes the same build script used by the other triggers. The build script SHALL also be runnable locally via `npm run build:devcontainer` with equivalent arguments, producing equivalent output, so that local and CI builds do not diverge.
+The build workflow SHALL expose a `workflow_dispatch` trigger that requires a `repo` input and accepts an optional `commitSha` input. The workflow SHALL invoke the same build script used locally. The build script SHALL also be runnable locally via `npm run build:devcontainer` with equivalent arguments, producing equivalent output, so that local and CI builds do not diverge.
 
 #### Scenario: Manual dispatch builds a single repo at a chosen SHA
 

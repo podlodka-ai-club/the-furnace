@@ -44,21 +44,8 @@ export type BuildManifest = {
 
 export type RequiredBuildEnv = Record<RequiredEnvName, string>;
 
-export type BuildPlanItem = {
-  repo: NormalizedRepoConfig;
-  commitSha: string;
-  reason: "missing-manifest" | "changed";
-};
-
-type StaleBuildFailure = {
-  repo: NormalizedRepoConfig;
-  error: unknown;
-};
-
 type CliOptions =
   | { mode: "repo"; repoSlug: string; commitSha?: string }
-  | { mode: "stale" }
-  | { mode: "all"; useManifestSha: boolean }
   | { mode: "help" };
 
 type RunProcessOptions = {
@@ -188,33 +175,6 @@ export function resolveWorkspacePath(
   return value;
 }
 
-export function planStaleBuilds(
-  repos: NormalizedRepoConfig[],
-  currentShas: Map<string, string>,
-  manifests: Map<string, BuildManifest>,
-): BuildPlanItem[] {
-  const plan: BuildPlanItem[] = [];
-
-  for (const repo of repos) {
-    const currentSha = currentShas.get(repo.slug);
-    if (!currentSha) {
-      throw new DevcontainerImageBuildError(`Missing current SHA for ${repo.slug}`);
-    }
-
-    const manifest = manifests.get(repo.slug);
-    if (!manifest) {
-      plan.push({ repo, commitSha: currentSha, reason: "missing-manifest" });
-      continue;
-    }
-
-    if (manifest.commitSha !== currentSha) {
-      plan.push({ repo, commitSha: currentSha, reason: "changed" });
-    }
-  }
-
-  return plan;
-}
-
 export function createManifest(input: {
   repo: NormalizedRepoConfig;
   commitSha: string;
@@ -285,19 +245,6 @@ export async function readDevcontainerConfig(
   }
 
   return parsed;
-}
-
-export async function readManifest(repoRoot: string, slug: string): Promise<BuildManifest | undefined> {
-  const manifestPath = path.join(repoRoot, "build", slug, "manifest.json");
-  try {
-    const raw = await readFile(manifestPath, "utf8");
-    return JSON.parse(raw) as BuildManifest;
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
 }
 
 export async function writeManifest(repoRoot: string, manifest: BuildManifest): Promise<void> {
@@ -406,13 +353,6 @@ export async function runCli(argv: string[], repoRoot = process.cwd()): Promise<
     console.log(`Built ${manifest.repoSlug} ${manifest.commitSha} -> ${manifest.imageRef}`);
     return;
   }
-
-  if (options.mode === "stale") {
-    await buildStaleRepos(repoRoot);
-    return;
-  }
-
-  await buildAllRepos(repoRoot, options.useManifestSha);
 }
 
 export function parseCliArgs(argv: string[]): CliOptions {
@@ -422,91 +362,22 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   const repoSlug = readArgValue(argv, "--repo");
   const commitSha = readArgValue(argv, "--sha");
-  const stale = argv.includes("--stale");
-  const all = argv.includes("--all");
-  const useManifestSha = argv.includes("--use-manifest-sha");
-
-  const selectedModes = [repoSlug !== undefined, stale, all].filter(Boolean).length;
-  if (selectedModes !== 1) {
-    throw new DevcontainerImageBuildError("Specify exactly one of --repo <slug>, --stale, or --all");
+  const unsupportedModes = ["--stale", "--all", "--use-manifest-sha"].filter((arg) => argv.includes(arg));
+  if (unsupportedModes.length > 0) {
+    throw new DevcontainerImageBuildError(
+      `${unsupportedModes.join(", ")} ${unsupportedModes.length === 1 ? "is" : "are"} not supported; use --repo <slug> [--sha <commitSha>]`,
+    );
   }
 
   if (commitSha && !repoSlug) {
-    throw new DevcontainerImageBuildError("--sha can only be used with --repo");
+    throw new DevcontainerImageBuildError("--sha requires --repo <slug>");
   }
 
-  if (useManifestSha && !all) {
-    throw new DevcontainerImageBuildError("--use-manifest-sha can only be used with --all");
+  if (!repoSlug) {
+    throw new DevcontainerImageBuildError("Specify --repo <slug> [--sha <commitSha>]");
   }
 
-  if (repoSlug) {
-    return { mode: "repo", repoSlug, commitSha };
-  }
-  if (stale) {
-    return { mode: "stale" };
-  }
-  return { mode: "all", useManifestSha };
-}
-
-export async function buildStaleRepos(repoRoot = process.cwd()): Promise<BuildManifest[]> {
-  const env = assertRequiredEnv();
-  const repos = await loadReposConfig(repoRoot);
-  const currentShas = new Map<string, string>();
-  const manifests = new Map<string, BuildManifest>();
-  const pollableRepos: NormalizedRepoConfig[] = [];
-  const failures: StaleBuildFailure[] = [];
-
-  for (const repo of repos) {
-    try {
-      currentShas.set(repo.slug, await fetchCurrentCommitSha(repo, env.TARGET_REPO_GITHUB_TOKEN));
-      const manifest = await readManifest(repoRoot, repo.slug);
-      if (manifest) {
-        manifests.set(repo.slug, manifest);
-      }
-      pollableRepos.push(repo);
-    } catch (error) {
-      failures.push({ repo, error });
-    }
-  }
-
-  const plan = planStaleBuilds(pollableRepos, currentShas, manifests);
-  if (plan.length === 0 && failures.length === 0) {
-    console.log("All tracked devcontainer images are current.");
-    return [];
-  }
-
-  const results: BuildManifest[] = [];
-  for (const item of plan) {
-    console.log(`Building ${item.repo.slug} at ${item.commitSha} (${item.reason})`);
-    try {
-      results.push(await buildRepoImage({ repoRoot, repoSlug: item.repo.slug, commitSha: item.commitSha }));
-    } catch (error) {
-      failures.push({ repo: item.repo, error });
-    }
-  }
-
-  if (failures.length > 0) {
-    throw buildStaleFailureError(failures);
-  }
-
-  return results;
-}
-
-export async function buildAllRepos(repoRoot = process.cwd(), useManifestSha = false): Promise<BuildManifest[]> {
-  const env = assertRequiredEnv();
-  const repos = await loadReposConfig(repoRoot);
-  const results: BuildManifest[] = [];
-
-  for (const repo of repos) {
-    const manifest = await readManifest(repoRoot, repo.slug);
-    const commitSha = useManifestSha && manifest
-      ? manifest.commitSha
-      : await fetchCurrentCommitSha(repo, env.TARGET_REPO_GITHUB_TOKEN);
-    console.log(`Building ${repo.slug} at ${commitSha}`);
-    results.push(await buildRepoImage({ repoRoot, repoSlug: repo.slug, commitSha }));
-  }
-
-  return results;
+  return { mode: "repo", repoSlug, commitSha };
 }
 
 export function buildImageRepository(registryBase: string, slug: string): string {
@@ -697,19 +568,6 @@ function extractDigest(output: string): string {
   return match[1];
 }
 
-function buildStaleFailureError(failures: StaleBuildFailure[]): DevcontainerImageBuildError {
-  const details = failures.map(({ repo, error }) => {
-    return `- ${repo.slug} (${repo.owner}/${repo.name}): ${errorMessage(error)}`;
-  });
-  return new DevcontainerImageBuildError(
-    [`Failed to poll/build ${failures.length} tracked devcontainer repo(s):`, ...details].join("\n"),
-  );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function sanitize(text: string, secrets: string[]): string {
   return secrets.reduce((current, secret) => {
     if (!secret) {
@@ -743,7 +601,5 @@ function helpText(): string {
   return [
     "Usage:",
     "  npm run build:devcontainer -- --repo <slug> [--sha <commitSha>]",
-    "  npm run build:devcontainer -- --stale",
-    "  npm run build:devcontainer -- --all [--use-manifest-sha]",
   ].join("\n");
 }

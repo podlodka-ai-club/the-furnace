@@ -71,14 +71,11 @@ npm run build:devcontainer -- --repo <repo-slug>
 
 # Build one repo at an explicit commit
 npm run build:devcontainer -- --repo <repo-slug> --sha <commit-sha>
-
-# Poll tracked repos and build only missing/stale manifests
-npm run build:devcontainer -- --stale
 ```
 
-Successful builds write `build/<repo-slug>/manifest.json` with the digest-pinned `imageRef` consumed by later runtime work. The alias tags `:sha-<commit>` and `:main` are for human discovery only.
+Successful builds write `build/<repo-slug>/manifest.json` with the digest-pinned `imageRef` consumed by later runtime work. The alias tags `:sha-<commit>` and `:main` are for human discovery only. For MVP, image builds are intended to be run on demand when the Linear-driven orchestrator picks up a ticket and resolves the target repo/ref to an exact commit SHA.
 
-The GitHub Actions workflow commits generated manifest updates back to `main` with the default `GITHUB_TOKEN`. Repositories using protected `main` branches must allow GitHub Actions to push those generated manifest commits, or replace the commit-back step with a PR-opening flow before enabling the scheduled workflow.
+The GitHub Actions workflow is a manual `workflow_dispatch` entry point for rebuilds and debugging. It commits generated manifest updates back to `main` with the default `GITHUB_TOKEN`. Repositories using protected `main` branches must allow GitHub Actions to push those generated manifest commits, or replace the commit-back step with a PR-opening flow before using the workflow.
 
 ## Spec-driven workflow
 

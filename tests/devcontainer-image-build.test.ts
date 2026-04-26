@@ -1,17 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import {
   assertRequiredEnv,
-  buildStaleRepos,
   createManifest,
   fetchCurrentCommitSha,
   manifestContainsSecrets,
   parseCliArgs,
-  planStaleBuilds,
   renderWarmupDockerfile,
   resolveWorkspacePath,
   validateReposConfig,
@@ -111,99 +105,23 @@ describe("devcontainer image build contracts", () => {
     );
   });
 
-  it("plans stale builds for missing and changed manifests only", () => {
-    const changedRepo = { ...repo, slug: "acme-api", name: "api" };
-    const missingRepo = { ...repo, slug: "acme-missing", name: "missing" };
-    const repos = [repo, changedRepo, missingRepo];
-    const currentShas = new Map([
-      [repo.slug, "sha-a"],
-      [changedRepo.slug, "sha-b"],
-      [missingRepo.slug, "sha-c"],
-    ]);
-    const manifests = new Map<string, BuildManifest>([
-      [repo.slug, manifestFor(repo, "sha-a")],
-      [changedRepo.slug, manifestFor(changedRepo, "old-sha")],
-    ]);
-
-    expect(planStaleBuilds(repos, currentShas, manifests)).toEqual([
-      { repo: changedRepo, commitSha: "sha-b", reason: "changed" },
-      { repo: missingRepo, commitSha: "sha-c", reason: "missing-manifest" },
-    ]);
-  });
-
-  it("continues scheduled stale polling after one repo fails discovery", async () => {
-    const repoRoot = await mkdtemp(path.join(tmpdir(), "furnace-devcontainer-test-"));
-    const originalFetch = globalThis.fetch;
-    const originalEnv = {
-      DEVCONTAINER_REGISTRY_URL: process.env.DEVCONTAINER_REGISTRY_URL,
-      DEVCONTAINER_REGISTRY_TOKEN: process.env.DEVCONTAINER_REGISTRY_TOKEN,
-      TARGET_REPO_GITHUB_TOKEN: process.env.TARGET_REPO_GITHUB_TOKEN,
-    };
-    const badRepo: NormalizedRepoConfig = {
-      slug: "bad-repo",
-      owner: "bad",
-      name: "repo",
-      ref: "main",
-      devcontainerPath: ".devcontainer/devcontainer.json",
-    };
-    const seenUrls: string[] = [];
-
-    try {
-      await mkdir(path.join(repoRoot, "build", repo.slug), { recursive: true });
-      await writeFile(
-        path.join(repoRoot, "build", "repos.json"),
-        JSON.stringify([badRepo, repo], null, 2),
-      );
-      await writeFile(
-        path.join(repoRoot, "build", repo.slug, "manifest.json"),
-        JSON.stringify(manifestFor(repo, "sha-a"), null, 2),
-      );
-
-      process.env.DEVCONTAINER_REGISTRY_URL = "ghcr.io/acme";
-      process.env.DEVCONTAINER_REGISTRY_TOKEN = "registry-token";
-      process.env.TARGET_REPO_GITHUB_TOKEN = "github-token";
-      globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
-        const url = String(input);
-        seenUrls.push(url);
-        if (url.includes("/repos/bad/repo/")) {
-          return {
-            ok: false,
-            status: 404,
-            statusText: "Not Found",
-            json: async () => ({}),
-          };
-        }
-
-        return {
-          ok: true,
-          status: 200,
-          statusText: "OK",
-          json: async () => ({ sha: "sha-a" }),
-        };
-      }) as typeof fetch;
-
-      await expect(buildStaleRepos(repoRoot)).rejects.toThrow(/bad-repo \(bad\/repo\).*404 Not Found/s);
-      expect(seenUrls.some((url) => url.includes("/repos/acme/app/"))).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-      restoreEnv(originalEnv);
-      await rm(repoRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("validates CLI modes and mode-specific options", () => {
+  it("validates the on-demand CLI mode and mode-specific options", () => {
+    expect(parseCliArgs(["--repo", "acme-app"])).toEqual({
+      mode: "repo",
+      repoSlug: "acme-app",
+      commitSha: undefined,
+    });
     expect(parseCliArgs(["--repo", "acme-app", "--sha", "abc123"])).toEqual({
       mode: "repo",
       repoSlug: "acme-app",
       commitSha: "abc123",
     });
-    expect(parseCliArgs(["--stale"])).toEqual({ mode: "stale" });
-    expect(parseCliArgs(["--all", "--use-manifest-sha"])).toEqual({ mode: "all", useManifestSha: true });
 
-    expect(() => parseCliArgs([])).toThrow(/Specify exactly one/);
-    expect(() => parseCliArgs(["--repo", "acme-app", "--stale"])).toThrow(/Specify exactly one/);
-    expect(() => parseCliArgs(["--sha", "abc123", "--stale"])).toThrow(/--sha can only be used with --repo/);
-    expect(() => parseCliArgs(["--use-manifest-sha", "--stale"])).toThrow(/--use-manifest-sha can only be used with --all/);
+    expect(() => parseCliArgs([])).toThrow(/Specify --repo/);
+    expect(() => parseCliArgs(["--sha", "abc123"])).toThrow(/--sha requires --repo/);
+    expect(() => parseCliArgs(["--stale"])).toThrow(/not supported/);
+    expect(() => parseCliArgs(["--all"])).toThrow(/not supported/);
+    expect(() => parseCliArgs(["--use-manifest-sha"])).toThrow(/not supported/);
   });
 
   it("reports unauthorized or not-found target repo access with slug and repo identity", async () => {
@@ -266,14 +184,4 @@ function manifestFor(testRepo: NormalizedRepoConfig, commitSha: string): BuildMa
     devcontainerCliVersion: "0.85.0",
     builtAt: "2026-04-26T00:00:00.000Z",
   });
-}
-
-function restoreEnv(env: Record<string, string | undefined>): void {
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
 }

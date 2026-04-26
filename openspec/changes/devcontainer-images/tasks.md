@@ -43,42 +43,26 @@
 - [x] 7.1 Add `npm run build:devcontainer` in root `package.json` invoking `scripts/build-devcontainer-image.ts`
 - [x] 7.2 Confirm a local invocation for a known repo+SHA produces a manifest of the same shape and field set as a CI invocation for the same inputs
 
-## 8. CI workflow — scheduled poll
+## 8. CI workflow — manual dispatch only
 
-- [x] 8.1 Create `.github/workflows/build-devcontainer-images.yml` with a `schedule.cron` trigger defaulting to `*/15 * * * *`
-- [x] 8.2 Implement the poll job: iterate `build/repos.json` and fetch each tracked repo's main HEAD via the GitHub API using `TARGET_REPO_GITHUB_TOKEN`
-- [x] 8.3 Treat a missing `build/<slug>/manifest.json` as stale and invoke the build script at the returned SHA
-- [x] 8.4 For each repo whose returned SHA differs from the manifest's `commitSha`, invoke the build script at the new SHA; leave matching repos untouched
-- [x] 8.5 Verify unauthorized or 404 responses for a tracked repo cause a non-zero exit with the slug + owner/name reported, and prevent any image push for that repo
+- [x] 8.1 Create `.github/workflows/build-devcontainer-images.yml` with `workflow_dispatch` and required `repo` plus optional `commitSha` inputs
+- [x] 8.2 Implement the dispatch job: invoke the build script for the provided repo and optional SHA
+- [x] 8.3 Keep the workflow free of `schedule` and `push` triggers for MVP so images are not rebuilt in the background
+- [x] 8.4 Add a step that commits the updated `build/<slug>/manifest.json` to `main` on every successful manual build, authored by `github-actions[bot]`, with a commit message recording slug, target commit SHA, and image digest
 
-## 9. CI workflow — pipeline self-change rebuild-all
+## 9. Automated test coverage
 
-- [x] 9.1 Add a `push.branches: [main]` trigger with an inputs-only `paths` allowlist: `scripts/build-devcontainer-image.ts`, `scripts/build/**`, `build/repos.json`, `.github/workflows/build-devcontainer-images.yml`, `package.json`, `package-lock.json`
-- [x] 9.2 Add an inline comment in the workflow YAML stating that `build/<slug>/manifest.json` is intentionally excluded to prevent self-trigger loops
-- [x] 9.3 Implement the rebuild-all job: invoke the build script for every entry in `build/repos.json` at its currently pinned `commitSha`
-- [x] 9.4 Add `if: github.actor != 'github-actions[bot]'` to the rebuild-all job as defense in depth
+- [x] 9.1 Add automated tests for required-env fast failures covering `DEVCONTAINER_REGISTRY_URL`, `DEVCONTAINER_REGISTRY_TOKEN`, and `TARGET_REPO_GITHUB_TOKEN`
+- [x] 9.2 Add automated tests for `build/repos.json` validation: requested slug missing, slug mismatch, and normalized-slug collision
+- [x] 9.3 Add automated tests for workspace path resolution: explicit `workspacePath`, `devcontainer.json.workspaceFolder`, `/workspaces/<name>` fallback, relative path rejection, and unresolved-variable rejection
+- [x] 9.4 Add automated tests for CLI mode validation: `--repo`, optional `--sha`, and rejection of background rebuild modes
+- [x] 9.5 Add automated tests for unauthorized/not-found target repo access failing without publishing
+- [x] 9.6 Add automated tests for manifest shape, digest-ref construction, and exclusion of registry/source token values
+- [x] 9.7 Run `npm test` from the repo root and keep it passing
 
-## 10. CI workflow — manual dispatch
+## 10. End-to-end validation
 
-- [x] 10.1 Add `workflow_dispatch` with optional `repo` and `commitSha` inputs
-- [x] 10.2 Implement the dispatch job: invoke the build script with the provided inputs, or rebuild all tracked repos at their current SHAs when `repo` is empty
-
-## 11. CI workflow — manifest commit-back
-
-- [x] 11.1 Add a step that commits the updated `build/<slug>/manifest.json` to `main` on every successful build, authored by `github-actions[bot]`, with a commit message recording slug, target commit SHA, and image digest
-
-## 12. Automated test coverage
-
-- [x] 12.1 Add automated tests for required-env fast failures covering `DEVCONTAINER_REGISTRY_URL`, `DEVCONTAINER_REGISTRY_TOKEN`, and `TARGET_REPO_GITHUB_TOKEN`
-- [x] 12.2 Add automated tests for `build/repos.json` validation: requested slug missing, slug mismatch, and normalized-slug collision
-- [x] 12.3 Add automated tests for workspace path resolution: explicit `workspacePath`, `devcontainer.json.workspaceFolder`, `/workspaces/<name>` fallback, relative path rejection, and unresolved-variable rejection
-- [x] 12.4 Add automated tests for poll/build decision logic: missing manifest builds, matching manifest skips, changed SHA builds, and unauthorized/not-found target repo access fails without publishing
-- [x] 12.5 Add automated tests for manifest shape, digest-ref construction, and exclusion of registry/source token values
-- [x] 12.6 Run `npm test` from the repo root and keep it passing
-
-## 13. End-to-end validation
-
-- [x] 13.1 Run `npm run build:devcontainer -- --repo <demo-slug>` locally with valid env vars against the initial demo repo
-- [x] 13.2 Confirm `docker pull <imageRef>` resolves the image whose digest matches `manifest.json.imageDigest` exactly
-- [x] 13.3 Run a one-off `docker run --rm <imageRef>` command (e.g., `ls <workspacePath>`) and confirm the cloned source is present at the recorded workspace path
-- [x] 13.4 Inspect the image and confirm no `/opt/furnace/` content exists and the image's `CMD` is the value set by the devcontainer base layer
+- [x] 10.1 Run `npm run build:devcontainer -- --repo <demo-slug> --sha <commitSha>` locally with valid env vars against the initial demo repo
+- [x] 10.2 Confirm `docker pull <imageRef>` resolves the image whose digest matches `manifest.json.imageDigest` exactly
+- [x] 10.3 Run a one-off `docker run --rm <imageRef>` command (e.g., `ls <workspacePath>`) and confirm the cloned source is present at the recorded workspace path
+- [x] 10.4 Inspect the image and confirm no `/opt/furnace/` content exists and the image's `CMD` is the value set by the devcontainer base layer

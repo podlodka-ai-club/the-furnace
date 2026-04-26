@@ -39,7 +39,7 @@ There is no end-to-end test tier — this project has no user-facing frontend. H
 - `.env.test` (gitignored) — test-only overrides.
 - `DEVCONTAINER_REGISTRY_URL` — registry namespace for pre-warmed devcontainer images.
 - `DEVCONTAINER_REGISTRY_TOKEN` — registry write/pull token for devcontainer image builds.
-- `TARGET_REPO_GITHUB_TOKEN` — read-only GitHub token used to poll and clone tracked target repos.
+- `TARGET_REPO_GITHUB_TOKEN` — read-only GitHub token used to resolve refs and clone tracked target repos.
 
 ## Adding a new test
 
