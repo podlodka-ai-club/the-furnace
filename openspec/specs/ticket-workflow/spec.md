@@ -25,6 +25,11 @@ No-op implementations of spec, coder, and review phases SHALL return placeholder
 ### Requirement: Poller Workflow Enqueues One Ticket Workflow Per Agent-Ready Todo Ticket
 The system SHALL run a cron-based `LinearPollerWorkflow` that polls Linear for `agent-ready` tickets in `Todo` state and starts a `PerTicketWorkflow` for each discovered ticket using ticket-ID-based idempotency.
 
+#### Scenario: Worker startup ensures cron schedule exists
+- **WHEN** the Temporal worker process starts
+- **THEN** it MUST create or reuse a named Temporal schedule that starts `LinearPollerWorkflow` on a recurring interval
+- **AND** default poll cadence MUST be one minute unless overridden by environment configuration
+
 #### Scenario: Poll cycle starts workflows for new todo tickets only
 - **WHEN** `LinearPollerWorkflow` executes and receives a list of `agent-ready` tickets in `Todo` state
 - **THEN** it MUST attempt to start one `PerTicketWorkflow` per ticket using a deterministic workflow ID derived from the ticket ID
@@ -61,4 +66,3 @@ The system SHALL write a `workflow_runs` record when `PerTicketWorkflow` starts 
 - **WHEN** a `PerTicketWorkflow` begins and advances from spec to coder to review
 - **THEN** persistence MUST contain a run row created at start
 - **AND** that row MUST be updated at each phase transition with the current phase/status metadata
-
