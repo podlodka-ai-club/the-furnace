@@ -38,7 +38,7 @@ describe("Linear client integration", () => {
     expect(() => createLinearClient()).toThrowError(/LINEAR_TEAM_ID/);
   });
 
-  it("lists all agent-ready tickets across pages and maps response", async () => {
+  it("lists all agent-ready tickets across pages, requests label name, and resolves slug", async () => {
     const capturedBodies: unknown[] = [];
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -53,7 +53,13 @@ describe("Linear client integration", () => {
                   identifier: "ENG-1",
                   title: "Parent ticket",
                   priority: 2,
-                  labelIds: ["agent-ready"],
+                  labelIds: ["lid_agent_ready", "lid_repo_demo"],
+                  labels: {
+                    nodes: [
+                      { id: "lid_agent_ready", name: "agent-ready" },
+                      { id: "lid_repo_demo", name: "repo:demo" },
+                    ],
+                  },
                 },
               ],
               pageInfo: {
@@ -75,7 +81,13 @@ describe("Linear client integration", () => {
                   identifier: "ENG-2",
                   title: "Second ticket",
                   priority: 4,
-                  labelIds: ["agent-ready"],
+                  labelIds: ["lid_agent_ready", "lid_repo_demo"],
+                  labels: {
+                    nodes: [
+                      { id: "lid_agent_ready", name: "agent-ready" },
+                      { id: "lid_repo_demo", name: "repo:demo" },
+                    ],
+                  },
                 },
               ],
               pageInfo: {
@@ -93,6 +105,7 @@ describe("Linear client integration", () => {
       apiKey: "lin_api_key",
       teamId: "team_123",
       apiUrl: "https://linear.example/graphql",
+      repoSlugs: new Set(["demo"]),
     });
 
     const tickets = await client.listAgentReadyTickets();
@@ -104,14 +117,16 @@ describe("Linear client integration", () => {
         identifier: "ENG-1",
         title: "Parent ticket",
         priority: 2,
-        labelIds: ["agent-ready"],
+        labelIds: ["lid_agent_ready", "lid_repo_demo"],
+        targetRepoSlug: "demo",
       },
       {
         id: "issue_2",
         identifier: "ENG-2",
         title: "Second ticket",
         priority: 4,
-        labelIds: ["agent-ready"],
+        labelIds: ["lid_agent_ready", "lid_repo_demo"],
+        targetRepoSlug: "demo",
       },
     ]);
 
@@ -127,6 +142,10 @@ describe("Linear client integration", () => {
     });
     expect(capturedBodies[0]).toMatchObject({
       query: expect.stringContaining("($teamId: ID!, $after: String)"),
+    });
+    // The resolver depends on label `name`, so the GraphQL selection must request it.
+    expect(capturedBodies[0]).toMatchObject({
+      query: expect.stringMatching(/labels\s*\{\s*nodes\s*\{[\s\S]*\bname\b/),
     });
     expect(capturedBodies[1]).toMatchObject({
       variables: { after: "cursor_1", teamId: "team_123" },

@@ -6,7 +6,7 @@ import type {
   ReviewerInput,
   SpecPhaseOutput,
 } from "../agents/contracts/index.js";
-import type { Ticket } from "../linear/types.js";
+import type { ResolvedTicket } from "../linear/types.js";
 import * as helloActivities from "./activities/hello.js";
 import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
@@ -33,7 +33,7 @@ import { ensureLinearPollerSchedule } from "./schedule.js";
 
 export interface TemporalWorkerActivities {
   helloActivity(name: string): Promise<string>;
-  listAgentReadyTicketsActivity(): Promise<Ticket[]>;
+  listAgentReadyTicketsActivity(): Promise<ResolvedTicket[]>;
   syncLinearTicketStateActivity(input: SyncLinearTicketStateInput): Promise<void>;
   // Phase activities are NOT registered on the orchestrator queue in production;
   // they run inside ephemeral per-repo containers and are dispatched on the

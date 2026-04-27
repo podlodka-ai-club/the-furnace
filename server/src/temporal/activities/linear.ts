@@ -1,8 +1,21 @@
 import { createLinearClient } from "../../linear/client.js";
-import type { Ticket } from "../../linear/types.js";
+import type { ResolvedTicket } from "../../linear/types.js";
+import { loadRepoSlugRegistry } from "../repo-registry.js";
 
-export async function listAgentReadyTicketsActivity(): Promise<Ticket[]> {
-  const client = createLinearClient();
+let cachedRepoSlugs: ReadonlySet<string> | undefined;
+
+async function getRepoSlugs(): Promise<ReadonlySet<string>> {
+  if (cachedRepoSlugs) {
+    return cachedRepoSlugs;
+  }
+  const registry = await loadRepoSlugRegistry();
+  cachedRepoSlugs = new Set(registry.map((entry) => entry.slug));
+  return cachedRepoSlugs;
+}
+
+export async function listAgentReadyTicketsActivity(): Promise<ResolvedTicket[]> {
+  const repoSlugs = await getRepoSlugs();
+  const client = createLinearClient({ repoSlugs });
   return client.listAgentReadyTickets();
 }
 

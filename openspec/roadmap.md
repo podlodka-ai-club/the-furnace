@@ -50,4 +50,8 @@
 - [ ] `vote-aggregator` — Unanimous pass → auto-merge queue with veto window; split vote → human tiebreaker in Linear with per-persona reasoning
 - [ ] `slack-notifications` — Veto window alerts on auto-merge candidates; human tiebreaker notifications for split votes
 
+## Phase 7: Chores
+
+- [ ] `server-unused` — Project was created from classic web-api templates, therefore have server runned by server/index.ts that is only launching migrations and hosts /health endpoint. We should probably get rid of it
+
 > **Milestone:** Advanced governance complete — multi-persona review, split-vote escalation, and Slack-driven veto signaling.

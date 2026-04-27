@@ -92,6 +92,10 @@ export async function perTicketWorkflow(
   setHandler(currentPhaseQuery, () => currentPhase);
   setHandler(attemptCountQuery, () => attemptCount);
 
+  // Defense-in-depth: the Linear client now guarantees a non-empty slug at the
+  // producer boundary (see linear-target-repo-resolution change), so this check
+  // is dead code on the linear-poller path. It still guards manual workflow
+  // starts that bypass the Linear client.
   if (!input.targetRepoSlug || input.targetRepoSlug.trim().length === 0) {
     throw ApplicationFailure.nonRetryable(
       "perTicketWorkflow requires targetRepoSlug; got empty value",

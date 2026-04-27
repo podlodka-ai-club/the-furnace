@@ -1,11 +1,12 @@
 import { LinearClient as LinearSdkClient } from "@linear/sdk";
+import { resolveRepoSlugFromLabels } from "./resolveRepoSlug.js";
 import {
   type CreatedSubTicket,
   type LinearClientApi,
+  type ResolvedTicket,
   SUPPORTED_SUB_TICKET_TYPES,
   type PostedComment,
   type SupportedSubTicketType,
-  type Ticket,
 } from "./types.js";
 
 export type { SupportedSubTicketType } from "./types.js";
@@ -14,6 +15,11 @@ export interface CreateLinearClientOptions {
   apiKey?: string;
   teamId?: string;
   apiUrl?: string;
+  // Set of registered repo slugs (typically loaded once from build/repos.json
+  // by the calling activity). Required at call time of listAgentReadyTickets;
+  // pass it through here so the client doesn't re-read disk per call. When
+  // omitted, listAgentReadyTickets throws — callers must provide it.
+  repoSlugs?: ReadonlySet<string>;
 }
 
 const SUB_TICKET_TITLES: Record<SupportedSubTicketType, string> = {
@@ -39,6 +45,12 @@ const LIST_AGENT_READY_TICKETS_QUERY = `
         title
         priority
         labelIds
+        labels {
+          nodes {
+            id
+            name
+          }
+        }
       }
       pageInfo {
         hasNextPage
@@ -88,6 +100,9 @@ interface ListAgentReadyTicketsResponse {
       title: string;
       priority?: number;
       labelIds?: string[];
+      labels?: {
+        nodes?: Array<{ id: string; name: string }>;
+      };
     }>;
     pageInfo: {
       hasNextPage: boolean;
@@ -126,11 +141,18 @@ export function createLinearClient(options: CreateLinearClientOptions = {}): Lin
   const apiKey = requiredEnv("LINEAR_API_KEY", options.apiKey ?? process.env.LINEAR_API_KEY);
   const teamId = requiredEnv("LINEAR_TEAM_ID", options.teamId ?? process.env.LINEAR_TEAM_ID);
   const sdk = new LinearSdkClient({ apiKey, apiUrl: options.apiUrl });
+  const repoSlugs = options.repoSlugs;
 
   return {
-    async listAgentReadyTickets(): Promise<Ticket[]> {
+    async listAgentReadyTickets(): Promise<ResolvedTicket[]> {
       try {
-        const tickets: Ticket[] = [];
+        if (!repoSlugs) {
+          throw new Error(
+            "createLinearClient was called without repoSlugs; listAgentReadyTickets needs the registry to resolve targetRepoSlug",
+          );
+        }
+
+        const tickets: ResolvedTicket[] = [];
         let after: string | null = null;
 
         while (true) {
@@ -144,15 +166,39 @@ export function createLinearClient(options: CreateLinearClientOptions = {}): Lin
             throw new Error("Linear issues query returned no data");
           }
 
-          tickets.push(
-            ...page.nodes.map((node: ListAgentReadyTicketsResponse["issues"]["nodes"][number]) => ({
+          for (const node of page.nodes) {
+            const labelNodes = node.labels?.nodes ?? [];
+            const resolution = resolveRepoSlugFromLabels(labelNodes, repoSlugs);
+
+            if (!resolution.ok) {
+              const logEntry: {
+                event: "linear.ticket_skipped";
+                ticketId: string;
+                identifier: string;
+                reason: typeof resolution.reason;
+                offendingSlug?: string;
+              } = {
+                event: "linear.ticket_skipped",
+                ticketId: node.id,
+                identifier: node.identifier,
+                reason: resolution.reason,
+              };
+              if (resolution.reason === "unknown_repo_slug" && resolution.offending) {
+                logEntry.offendingSlug = resolution.offending;
+              }
+              console.warn(JSON.stringify(logEntry));
+              continue;
+            }
+
+            tickets.push({
               id: node.id,
               identifier: node.identifier,
               title: node.title,
               priority: node.priority ?? 0,
               labelIds: node.labelIds ?? [],
-            })),
-          );
+              targetRepoSlug: resolution.slug,
+            });
+          }
 
           if (!page.pageInfo.hasNextPage) {
             break;

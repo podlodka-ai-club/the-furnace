@@ -41,6 +41,8 @@ One **Temporal workflow per Linear ticket**. Each pipeline phase is a phase-leve
 
 A separate **Temporal cron workflow** polls Linear on a schedule for tickets labeled `agent-ready` and enqueues a new per-ticket workflow for each. Pull model, not webhooks — no public endpoint, no webhook secret management.
 
+> **Operator note:** Tickets must carry both an `agent-ready` label and exactly one `repo:<slug>` label whose `<slug>` matches an entry in `build/repos.json`. Tickets without a valid repo label (missing, multiple, or unknown slug) are logged and skipped — they will not start a workflow.
+
 ### Execution substrate
 
 **Ephemeral devcontainers as Temporal workers.** A container boots, registers itself with Temporal with capability metadata (languages, tools, repo it's specialized for), claims a matching task, executes, and dies. Worker lifecycle and sandbox lifecycle are the same event. Cleanup is a free side-effect of task completion.

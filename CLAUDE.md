@@ -24,3 +24,7 @@ This project uses OpenSpec. Work is scoped as **changes** under `openspec/change
 - Integration tests hit PGLite directly, not mocks.
 - Commits reference the OpenSpec change they belong to.
 - Don't add dependencies outside of a change proposal that approves them.
+
+## Linear → workflow path
+
+Tickets must carry both an `agent-ready` label and exactly one `repo:<slug>` label whose `<slug>` matches an entry in `build/repos.json`. The Linear client (`server/src/linear/client.ts`) resolves the slug at the polling boundary and returns `ResolvedTicket[]`; tickets without a valid repo label are logged (`event: "linear.ticket_skipped"`) and skipped before any workflow starts.
