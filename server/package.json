@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "temporal:worker": "tsx src/temporal/worker.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "start": "tsx --env-file=.env src/index.ts",
+    "temporal:worker": "tsx --env-file=.env src/temporal/worker.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
