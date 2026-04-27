@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { describe, expect, it } from "vitest";
 import {
+  createPerRepoWorker,
   createTemporalWorker,
   type TemporalWorkerActivities,
 } from "../../src/temporal/worker.js";
 import { createTemporalClient } from "../../src/temporal/client.js";
 import { TEMPORAL_TASK_QUEUE } from "../../src/temporal/config.js";
+import { taskQueueForRepo } from "../../src/temporal/repo-slug.js";
 import {
   LINEAR_POLLER_WORKFLOW_NAME,
 } from "../../src/temporal/workflows/linear-poller.js";
@@ -24,6 +26,13 @@ import type {
   PersistWorkflowRunStartInput,
   PersistWorkflowRunTransitionInput,
 } from "../../src/temporal/activities/workflow-runs.js";
+import type {
+  LaunchWorkerContainerInput,
+  LaunchWorkerContainerResult,
+} from "../../src/temporal/activities/worker-launcher.js";
+
+const TEST_REPO_SLUG = "test-repo";
+const TEST_REPO_QUEUE = taskQueueForRepo(TEST_REPO_SLUG);
 
 describe("Temporal per-ticket workflow orchestration", () => {
   it("poller starts ticket workflows idempotently by ticket ID", async () => {
@@ -31,7 +40,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
 
     const ticketId = `issue-${randomUUID()}`;
     const activities: TemporalWorkerActivities = {
-      helloActivity: async (name: string) => `hello, ${name}`,
+      ...buildBaseActivities(),
       listAgentReadyTicketsActivity: async () => [
         {
           id: ticketId,
@@ -39,32 +48,9 @@ describe("Temporal per-ticket workflow orchestration", () => {
           title: "Agent-ready ticket",
           priority: 1,
           labelIds: ["agent-ready"],
+          targetRepoSlug: TEST_REPO_SLUG,
         },
       ],
-      runSpecPhase: async (input: SpecPhaseInput) => ({
-        featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
-        testCommits: [
-          {
-            sha: "a".repeat(40),
-            path: "server/tests/integration/sample.test.ts",
-            description: `Failing acceptance tests for ${input.ticket.identifier}`,
-          },
-        ],
-      }),
-      runCoderPhase: async (input: SpecPhaseOutput) => ({
-        featureBranch: input.featureBranch,
-        finalCommitSha: "c".repeat(40),
-        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
-        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
-      }),
-      runReviewPhase: async (_input: ReviewerInput) => ({
-        verdict: "approve",
-        reasoning: "ok",
-        findings: [],
-      }),
-      syncLinearTicketStateActivity: async (_input) => {},
-      persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
-      persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
     };
 
     const client = await createTemporalClient();
@@ -103,17 +89,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
       releaseSpec = resolve;
     });
 
-    const activities: TemporalWorkerActivities = {
-      helloActivity: async (name: string) => `hello, ${name}`,
-      listAgentReadyTicketsActivity: async () => [
-        {
-          id: ticketId,
-          identifier: "ENG-1",
-          title: "Agent-ready ticket",
-          priority: 1,
-          labelIds: ["agent-ready"],
-        },
-      ],
+    const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         await specGate;
         return {
@@ -134,39 +110,60 @@ describe("Temporal per-ticket workflow orchestration", () => {
         testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
       }),
       runReviewPhase: async (_input: ReviewerInput) => ({
-        verdict: "approve",
+        verdict: "approve" as const,
         reasoning: "ok",
         findings: [],
       }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      listAgentReadyTicketsActivity: async () => [
+        {
+          id: ticketId,
+          identifier: "ENG-1",
+          title: "Agent-ready ticket",
+          priority: 1,
+          labelIds: ["agent-ready"],
+          targetRepoSlug: TEST_REPO_SLUG,
+        },
+      ],
       syncLinearTicketStateActivity: async (input) => {
         syncedStateNames.push(input.stateName);
       },
-      persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
-      persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
     };
 
     const client = await createTemporalClient();
     const worker = await createTemporalWorker({ activities });
-
-    await worker.runUntil(async () => {
-      const pollerHandle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
-        args: [],
-        taskQueue: TEMPORAL_TASK_QUEUE,
-        workflowId: `poller-${randomUUID()}`,
-      });
-
-      await expect(pollerHandle.result()).resolves.toEqual({
-        discovered: 1,
-        started: 1,
-        skipped: 0,
-      });
-
-      const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(ticketId));
-      await waitFor(async () => (await ticketHandle.query(currentPhaseQuery)) === "spec");
-
-      releaseSpec?.();
-      await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
     });
+
+    await Promise.all([
+      worker.runUntil(async () => {
+        await repoWorker.runUntil(async () => {
+          const pollerHandle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
+            args: [],
+            taskQueue: TEMPORAL_TASK_QUEUE,
+            workflowId: `poller-${randomUUID()}`,
+          });
+
+          await expect(pollerHandle.result()).resolves.toEqual({
+            discovered: 1,
+            started: 1,
+            skipped: 0,
+          });
+
+          const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(ticketId));
+          await waitFor(async () => (await ticketHandle.query(currentPhaseQuery)) === "spec");
+
+          releaseSpec?.();
+          await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+        });
+      }),
+    ]);
 
     expect(syncedStateNames).toEqual(["In Progress", "Done"]);
   }, 30_000);
@@ -181,9 +178,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
       releaseSpec = resolve;
     });
 
-    const activities: TemporalWorkerActivities = {
-      helloActivity: async (name: string) => `hello, ${name}`,
-      listAgentReadyTicketsActivity: async () => [],
+    const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         phaseCalls.push("spec");
         await specGate;
@@ -210,51 +205,100 @@ describe("Temporal per-ticket workflow orchestration", () => {
       runReviewPhase: async (_input: ReviewerInput) => {
         phaseCalls.push("review");
         return {
-          verdict: "approve",
+          verdict: "approve" as const,
           reasoning: "ok",
           findings: [],
         };
       },
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      listAgentReadyTicketsActivity: async () => [],
       syncLinearTicketStateActivity: async (input) => {
         syncedStateNames.push(input.stateName);
       },
-      persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
-      persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
     };
 
     const client = await createTemporalClient();
     const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
 
     await worker.runUntil(async () => {
-      const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
-        args: [
-          {
-            ticket: {
-              id: "issue_2",
-              identifier: "ENG-2",
-              title: "Cancelable ticket",
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_2",
+                identifier: "ENG-2",
+                title: "Cancelable ticket",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
             },
-          },
-        ],
-        taskQueue: TEMPORAL_TASK_QUEUE,
-        workflowId: `ticket-test-${randomUUID()}`,
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `ticket-test-${randomUUID()}`,
+        });
+
+        await waitFor(async () => (await handle.query(currentPhaseQuery)) === "spec");
+        expect(await handle.query(attemptCountQuery)).toBe(1);
+
+        await handle.signal(cancelSignal);
+        releaseSpec?.();
+
+        await expect(handle.result()).resolves.toEqual({ status: "cancelled" });
+        expect(await handle.query(currentPhaseQuery)).toBe("cancelled");
+        expect(await handle.query(attemptCountQuery)).toBe(1);
       });
-
-      await waitFor(async () => (await handle.query(currentPhaseQuery)) === "spec");
-      expect(await handle.query(attemptCountQuery)).toBe(1);
-
-      await handle.signal(cancelSignal);
-      releaseSpec?.();
-
-      await expect(handle.result()).resolves.toEqual({ status: "cancelled" });
-      expect(await handle.query(currentPhaseQuery)).toBe("cancelled");
-      expect(await handle.query(attemptCountQuery)).toBe(1);
     });
 
     expect(phaseCalls).toEqual(["spec"]);
     expect(syncedStateNames).toEqual(["In Progress", "Canceled"]);
   }, 30_000);
 });
+
+function buildBaseActivities(): TemporalWorkerActivities {
+  return {
+    helloActivity: async (name: string) => `hello, ${name}`,
+    listAgentReadyTicketsActivity: async () => [],
+    syncLinearTicketStateActivity: async (_input) => {},
+    runSpecPhase: async (_input: SpecPhaseInput) => ({
+      featureBranch: "agent/spec",
+      testCommits: [
+        {
+          sha: "a".repeat(40),
+          path: "server/tests/integration/sample.test.ts",
+          description: "default",
+        },
+      ],
+    }),
+    runCoderPhase: async (input: SpecPhaseOutput) => ({
+      featureBranch: input.featureBranch,
+      finalCommitSha: "c".repeat(40),
+      diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+      testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+    }),
+    runReviewPhase: async (_input: ReviewerInput) => ({
+      verdict: "approve",
+      reasoning: "ok",
+      findings: [],
+    }),
+    persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
+    persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
+    launchWorkerContainer: async (
+      input: LaunchWorkerContainerInput,
+    ): Promise<LaunchWorkerContainerResult> => ({
+      containerId: `stub-${input.attemptId}`,
+      queue: taskQueueForRepo(input.repoSlug),
+    }),
+    validateRepoSlug: async (_input: { slug: string }): Promise<void> => {},
+  };
+}
 
 async function assertTemporalPortReachable(): Promise<void> {
   await new Promise<void>((resolve, reject) => {

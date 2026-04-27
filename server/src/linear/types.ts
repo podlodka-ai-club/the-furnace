@@ -12,6 +12,11 @@ export interface Ticket {
   title: string;
   priority: number;
   labelIds: string[];
+  // The slug from build/repos.json identifying which target repo this ticket
+  // operates on. Resolution from a Linear ticket field is owned by the
+  // linear-integration change; container-as-worker only requires that the
+  // slug is present in the ticket payload by the time the workflow starts.
+  targetRepoSlug?: string;
 }
 
 export interface CreatedSubTicket {

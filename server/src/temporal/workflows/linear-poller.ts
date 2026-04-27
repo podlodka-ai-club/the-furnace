@@ -39,6 +39,10 @@ export async function linearPollerWorkflow(): Promise<LinearPollerWorkflowResult
               identifier: ticket.identifier,
               title: ticket.title,
             },
+            // Resolution from Linear ticket fields lands in linear-integration;
+            // for now the slug must be present on the ticket payload, and the
+            // per-ticket workflow fails fast if it is missing or unknown.
+            targetRepoSlug: ticket.targetRepoSlug ?? "",
           },
         ],
         workflowId,

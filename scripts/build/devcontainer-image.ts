@@ -247,16 +247,23 @@ export async function readDevcontainerConfig(
   return parsed;
 }
 
-export async function writeManifest(repoRoot: string, manifest: BuildManifest): Promise<void> {
+export async function writeManifest(
+  repoRoot: string,
+  manifest: BuildManifest,
+  filename = "manifest.json",
+): Promise<void> {
   const manifestDir = path.join(repoRoot, "build", manifest.repoSlug);
   await mkdir(manifestDir, { recursive: true });
-  await writeFile(path.join(manifestDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(path.join(manifestDir, filename), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 export async function buildRepoImage(input: {
   repoRoot?: string;
   repoSlug: string;
   commitSha?: string;
+  // Local E2E builds pass "manifest.local.json" so the localhost-only output
+  // is distinguishable from CI-committed manifests and stays gitignored.
+  manifestFilename?: string;
 }): Promise<BuildManifest> {
   const repoRoot = input.repoRoot ?? process.cwd();
   const env = assertRequiredEnv();
@@ -334,7 +341,7 @@ export async function buildRepoImage(input: {
       throw new DevcontainerImageBuildError(`Refusing to write manifest for ${repo.slug}: manifest contains a secret value`);
     }
 
-    await writeManifest(repoRoot, manifest);
+    await writeManifest(repoRoot, manifest, input.manifestFilename);
     return manifest;
   } finally {
     await rm(tempDir, { recursive: true, force: true });

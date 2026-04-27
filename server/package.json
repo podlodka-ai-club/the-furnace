@@ -8,7 +8,8 @@
     "start": "tsx --env-file=.env src/index.ts",
     "temporal:worker": "tsx --env-file=.env src/temporal/worker.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:container-as-worker:e2e": "tsx scripts/test-container-as-worker-e2e.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.0",

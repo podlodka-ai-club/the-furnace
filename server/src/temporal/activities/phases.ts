@@ -1,3 +1,4 @@
+import { Context } from "@temporalio/activity";
 import {
   type CoderPhaseOutput,
   type ReviewResult,
@@ -20,8 +21,23 @@ export interface SpecPhaseInput {
   ticket: ReviewerTicket;
 }
 
+// Heartbeat once at the start of each no-op phase so the activity body is on
+// record with Temporal as a heartbeat-emitting activity. Real phase bodies
+// (spec-agent / coder-agent / review-agent) emit heartbeats on a schedule that
+// fits within the configured heartbeatTimeout (see dispatch.ts).
+function heartbeatStart(detail: Record<string, unknown>): void {
+  // Context.current() throws if called outside an activity (e.g. unit tests
+  // that call runSpecPhase directly). Treat that as a noop.
+  try {
+    Context.current().heartbeat(detail);
+  } catch {
+    // not running inside an activity context
+  }
+}
+
 export async function runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput> {
   const validatedInput = specPhaseInputSchema.parse(input);
+  heartbeatStart({ phase: "spec", ticketId: validatedInput.ticket.id });
   console.info("runSpecPhase noop", { ticketId: validatedInput.ticket.id });
 
   const output = {
@@ -40,6 +56,7 @@ export async function runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutp
 
 export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput> {
   const validatedInput = specPhaseOutputSchema.parse(input);
+  heartbeatStart({ phase: "coder", featureBranch: validatedInput.featureBranch });
   console.info("runCoderPhase noop", { featureBranch: validatedInput.featureBranch });
 
   const output = {
@@ -63,6 +80,7 @@ export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseO
 
 export async function runReviewPhase(input: ReviewerInput): Promise<ReviewResult> {
   const validatedInput = reviewerInputSchema.parse(input);
+  heartbeatStart({ phase: "review", ticketId: validatedInput.ticket.id });
   console.info("runReviewPhase noop", { ticketId: validatedInput.ticket.id });
 
   const output = {

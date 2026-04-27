@@ -40,13 +40,14 @@ async function run(): Promise<void> {
   console.log(`Building ${repo.slug} at ${commitSha}`);
   console.log(`Registry: ${process.env.DEVCONTAINER_REGISTRY_URL}`);
 
-  const manifest = await buildRepoImage({ repoRoot, repoSlug: repo.slug, commitSha });
+  const manifestFilename = "manifest.local.json";
+  const manifest = await buildRepoImage({ repoRoot, repoSlug: repo.slug, commitSha, manifestFilename });
   await verifyImage(manifest);
 
   console.log("");
-  console.log(`Manifest: ${path.join(repoRoot, "build", manifest.repoSlug, "manifest.json")}`);
+  console.log(`Manifest: ${path.join(repoRoot, "build", manifest.repoSlug, manifestFilename)}`);
   console.log(`Image: ${manifest.imageRef}`);
-  console.log("Local E2E passed. Do not commit localhost manifest output.");
+  console.log("Local E2E passed. (manifest.local.json is gitignored.)");
 }
 
 function parseArgs(argv: string[]): CliOptions {

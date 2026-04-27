@@ -25,7 +25,7 @@
 ## Phase 3: Container runtime
 
 - [x] `devcontainer-images` — Pre-warmed per-repo devcontainer images using the repo's existing `devcontainer.json`, with repo cloned and deps installed
-- [ ] `container-as-worker` — Container boots, registers as a Temporal worker with capability metadata, claims a matching task, dies on completion
+- [x] `container-as-worker` — Container boots, registers as a Temporal worker with capability metadata, claims a matching task, dies on completion
 
 > **Milestone:** A per-ticket workflow dispatches to an ephemeral container that runs a no-op activity and terminates cleanly.
 

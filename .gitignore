@@ -4,6 +4,7 @@ build/*
 !build/repos.json
 !build/*/
 !build/*/manifest.json
+build/*/manifest.local.json
 coverage/
 .nyc_output/
 
@@ -29,3 +30,5 @@ Thumbs.db
 .vite/
 .cache/
 .turbo/
+
+.claude/scheduled_tasks.lock

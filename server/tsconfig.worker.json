@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../dist/worker",
+    "rootDir": "src",
+    "declaration": false,
+    "sourceMap": false,
+    "noEmitOnError": true
+  },
+  "files": ["src/worker-entry.ts"]
+}
