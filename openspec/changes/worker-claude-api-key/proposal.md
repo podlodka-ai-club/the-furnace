@@ -6,10 +6,11 @@ The orchestrator already loads a local `.env` file via `tsx --env-file=.env` in 
 
 ## What Changes
 
-- Worker launcher reads `ANTHROPIC_API_KEY` from the orchestrator's loaded `process.env` (populated from the orchestrator's `.env` file by the existing `--env-file=.env` tsx flag) and forwards it to spawned worker containers via `docker run --env ANTHROPIC_API_KEY` when set.
-- The `~/.claude` bind-mount is retained in BOTH cases so the container has access to operator-level Claude settings, registered agents, MCP server config, and (on Linux) subscription credentials. The env var is purely additive auth, not a replacement for the mount.
-- Fail fast at orchestrator startup if NEITHER `ANTHROPIC_API_KEY` is loaded NOR the resolved `~/.claude` (or `CLAUDE_CREDS_DIR`) directory exists and is non-empty, so containers do not launch into an obviously-broken auth state.
-- Document `.env`-based setup in `README.md` and `TESTING.md`: how to put `ANTHROPIC_API_KEY=...` in `.env` for Mac operators (the file is already in `.gitignore`).
+- Worker launcher reads `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` from the orchestrator's loaded `process.env` (populated from `server/.env` by the existing `--env-file=.env` tsx flag) and forwards each, when set, to spawned worker containers via `docker run --env <NAME>`. Both can be passed simultaneously; the Claude Agent SDK's own resolution order picks one.
+- The `~/.claude` bind-mount is retained regardless so the container has access to operator-level Claude settings, registered agents, MCP server config, and (on Linux) subscription credentials. The env vars are purely additive auth, not a replacement for the mount.
+- `CLAUDE_CODE_OAUTH_TOKEN` is the recommended source for Mac operators on a Pro/Max subscription — generate it once via `claude setup-token` and drop it in `server/.env`. `ANTHROPIC_API_KEY` remains supported for operators who want metered API billing or who don't have a subscription.
+- Fail fast at orchestrator startup if NONE of `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or a non-empty `~/.claude` (or `CLAUDE_CREDS_DIR`) directory is available, so containers do not launch into an obviously-broken auth state.
+- Document `.env`-based setup in `README.md` and `TESTING.md`: how to put either token/key in `server/.env` (the file is already in `.gitignore`).
 
 ## Capabilities
 
@@ -19,7 +20,7 @@ The orchestrator already loads a local `.env` file via `tsx --env-file=.env` in 
 
 ### Modified Capabilities
 
-- `container-worker-lifecycle`: The Claude credentials requirement is generalized — the bind-mount of `~/.claude` is retained as the source of settings/agents/subscription-creds, and an additional auth source is introduced where the orchestrator forwards `ANTHROPIC_API_KEY` from its loaded environment to the container when present. A new precondition requires at least one viable auth source before any container launch.
+- `container-worker-lifecycle`: The Claude credentials requirement is generalized — the bind-mount of `~/.claude` is retained as the source of settings/agents/subscription-creds, and additional auth sources are introduced where the orchestrator forwards `CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY` from its loaded environment to the container when present. A new precondition requires at least one viable auth source before any container launch.
 
 ## Impact
 

@@ -56,6 +56,18 @@ When the worker boots, it ensures a recurring Temporal schedule exists for `line
 
 Per-ticket workflow state sync to Linear uses a Temporal activity with retry policy: initial interval `1s`, backoff `2x`, maximum interval `30s`, and maximum attempts `5`. If retries are exhausted, the workflow transition fails and remains visible for operator intervention.
 
+## Claude authentication
+
+Worker containers need Claude credentials to run the Agent SDK. Three sources are supported, all checked at orchestrator startup; if none is viable the orchestrator exits non-zero with an error naming every option before any container launches.
+
+1. `CLAUDE_CODE_OAUTH_TOKEN` (recommended on macOS for Pro/Max subscribers): generate once with `claude setup-token`, then add `CLAUDE_CODE_OAUTH_TOKEN=...` to `server/.env` (already gitignored). The token authenticates against your Claude subscription — same billing as `claude login`, no metered API charges — and works inside the container without needing the macOS Keychain. The npm `dev`/`start`/`temporal:worker` scripts auto-load it via `tsx --env-file=.env`, and the launcher forwards it via `docker run --env CLAUDE_CODE_OAUTH_TOKEN`.
+2. `ANTHROPIC_API_KEY` (metered API billing): add `ANTHROPIC_API_KEY=sk-...` to `server/.env`. The launcher forwards it via `docker run --env ANTHROPIC_API_KEY`. Use this when you want explicit per-token billing or don't have a Claude subscription.
+3. `~/.claude` bind-mount (Linux subscription auth): the launcher always read-only bind-mounts `~/.claude` (or `$CLAUDE_CREDS_DIR`) at `/root/.claude` inside the worker. On Linux this carries `claude login` subscription credentials. On macOS those credentials live in the Keychain, so the mount alone is not enough — use one of the env vars above.
+
+Both env vars can be set at once; the Claude Agent SDK's own resolution order picks one. Neither needs to be exported in the host shell — `server/.env` is the canonical source.
+
+The mount is retained regardless of which env var is set, because `~/.claude` also carries operator-level Claude settings, registered agents, and MCP server config that the SDK reads independently of how it authenticates.
+
 ## Devcontainer image builds
 
 `devcontainer-images` adds a per-target-repo image build pipeline. Tracked repos live in `build/repos.json`; each entry's `slug` must equal the normalized `<owner>-<name>` value.

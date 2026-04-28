@@ -42,6 +42,8 @@ There is no end-to-end test tier — this project has no user-facing frontend. H
 - `DEVCONTAINER_REGISTRY_URL` — registry namespace for pre-warmed devcontainer images.
 - `DEVCONTAINER_REGISTRY_TOKEN` — registry write/pull token for devcontainer image builds.
 - `TARGET_REPO_GITHUB_TOKEN` — read-only GitHub token used to resolve refs and clone tracked target repos.
+- `CLAUDE_CODE_OAUTH_TOKEN` — optional Claude OAuth token for worker containers, generated via `claude setup-token`. Authenticates against the operator's Claude Pro/Max subscription. Put it in `server/.env` (already gitignored); the `dev`/`start`/`temporal:worker` npm scripts auto-load it via `tsx --env-file=.env` and the launcher forwards it into containers. Do NOT export the token in your shell unless you are running an integration runner that does not pass through `--env-file`.
+- `ANTHROPIC_API_KEY` — optional Claude API key for worker containers (metered API billing alternative to `CLAUDE_CODE_OAUTH_TOKEN`). Same `server/.env` flow; same shell-export caveat. Local integration tests under `server/tests/integration/` reuse the same `.env` flow when launching workers, regardless of which auth env var is in use.
 
 ## Adding a new test
 

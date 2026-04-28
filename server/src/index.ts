@@ -2,11 +2,14 @@ import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { createDatabase, type Database } from "./db/index.js";
+import { assertWorkerAuthAvailable } from "./worker-launcher.js";
 
 async function main(): Promise<void> {
   if (process.env.DATABASE_URL) {
     throw new Error("prod driver not wired up yet — tracked for the deploy change");
   }
+
+  await assertWorkerAuthAvailable();
 
   const dataDir = fileURLToPath(new URL("../../data/pglite/pgdata", import.meta.url));
   const db: Database = await createDatabase({ dataDir });

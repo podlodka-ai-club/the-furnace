@@ -30,6 +30,7 @@ import {
 } from "./config.js";
 import { createTemporalClient } from "./client.js";
 import { ensureLinearPollerSchedule } from "./schedule.js";
+import { assertWorkerAuthAvailable } from "../worker-launcher.js";
 
 export interface TemporalWorkerActivities {
   helloActivity(name: string): Promise<string>;
@@ -132,6 +133,8 @@ export async function createPerRepoWorker(options: CreatePerRepoWorkerOptions): 
 }
 
 export async function runTemporalWorker(): Promise<void> {
+  await assertWorkerAuthAvailable();
+
   const client = await createTemporalClient();
   const scheduleOutcome = await ensureLinearPollerSchedule(client.schedule);
   console.log(`Linear poller schedule ${scheduleOutcome} (${TEMPORAL_TASK_QUEUE})`);

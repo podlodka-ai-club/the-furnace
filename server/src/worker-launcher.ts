@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -28,6 +28,8 @@ interface LauncherEnv {
   workerBundleDir: string;
   claudeCredsDir: string;
   buildDir: string;
+  claudeCodeOauthToken: string | null;
+  anthropicApiKey: string | null;
 }
 
 interface ManifestRead {
@@ -66,6 +68,12 @@ export async function launchWorkerContainer(
     "WORKER_LANGUAGES",
     "--env",
     "WORKER_TOOLS",
+    ...(env.claudeCodeOauthToken
+      ? ["--env", `CLAUDE_CODE_OAUTH_TOKEN=${env.claudeCodeOauthToken}`]
+      : []),
+    ...(env.anthropicApiKey
+      ? ["--env", `ANTHROPIC_API_KEY=${env.anthropicApiKey}`]
+      : []),
     "--mount",
     `type=bind,source=${env.claudeCredsDir},target=/root/.claude,readonly`,
     "--mount",
@@ -82,6 +90,8 @@ export async function launchWorkerContainer(
 
 function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
   const temporalAddress = env.TEMPORAL_ADDRESS ?? "localhost:7233";
+  const rawOauth = env.CLAUDE_CODE_OAUTH_TOKEN;
+  const rawAnthropic = env.ANTHROPIC_API_KEY;
   return {
     temporalAddress,
     containerTemporalAddress: env.CONTAINER_TEMPORAL_ADDRESS ?? temporalAddress,
@@ -89,7 +99,35 @@ function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
     workerBundleDir: env.WORKER_BUNDLE_DIR ?? path.resolve(process.cwd(), "dist", "worker"),
     claudeCredsDir: env.CLAUDE_CREDS_DIR ?? path.join(os.homedir(), ".claude"),
     buildDir: env.BUILD_DIR ?? path.resolve(process.cwd(), "build"),
+    claudeCodeOauthToken: rawOauth && rawOauth.length > 0 ? rawOauth : null,
+    anthropicApiKey: rawAnthropic && rawAnthropic.length > 0 ? rawAnthropic : null,
   };
+}
+
+// Validates that at least one Claude auth source is available before any
+// container launch. Either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY is set
+// in process.env, or the resolved credentials directory (defaulting to
+// ~/.claude) exists and contains at least one entry. Throws a single-line
+// Error naming all three options when none is viable so an operator can grep
+// for the message.
+export async function assertWorkerAuthAvailable(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const launcherEnv = readLauncherEnv(env);
+  if (launcherEnv.claudeCodeOauthToken || launcherEnv.anthropicApiKey) {
+    return;
+  }
+  try {
+    const entries = await readdir(launcherEnv.claudeCredsDir);
+    if (entries.length > 0) {
+      return;
+    }
+  } catch {
+    // fall through to throw below
+  }
+  throw new Error(
+    `Claude worker auth unavailable: set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in the orchestrator environment, or populate the credentials directory at ${launcherEnv.claudeCredsDir} (override with CLAUDE_CREDS_DIR).`,
+  );
 }
 
 async function loadManifest(slug: string, buildDir: string): Promise<ManifestRead> {
