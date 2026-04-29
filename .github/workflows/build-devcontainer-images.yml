@@ -38,30 +38,3 @@ jobs:
             args+=(--sha "${{ inputs.commitSha }}")
           fi
           npm run build:devcontainer -- "${args[@]}"
-      - name: Commit manifest update
-        run: |
-          if git diff --quiet -- build; then
-            echo "No manifest changes to commit."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add build/*/manifest.json
-
-          node <<'NODE' > /tmp/devcontainer-manifest-commit-message
-          const { execSync } = require("node:child_process");
-          const fs = require("node:fs");
-          const files = execSync("git diff --cached --name-only -- build", { encoding: "utf8" })
-            .trim()
-            .split("\n")
-            .filter(Boolean);
-          const details = files.map((file) => {
-            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
-            return `- ${manifest.repoSlug}: ${manifest.commitSha} ${manifest.imageDigest}`;
-          });
-          console.log(["chore(devcontainer-images): update image manifests", "", ...details].join("\n"));
-          NODE
-
-          git commit --file /tmp/devcontainer-manifest-commit-message
-          git push
