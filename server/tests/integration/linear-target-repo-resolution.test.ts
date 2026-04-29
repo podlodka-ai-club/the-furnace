@@ -22,6 +22,7 @@ import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
+import type { RecordAttemptInput } from "../../src/temporal/activities/attempts.js";
 
 const TEST_REPO_SLUG = "test-repo";
 const TEST_REGISTRY: ReadonlySet<string> = new Set([TEST_REPO_SLUG]);
@@ -154,6 +155,7 @@ function buildOrchestratorActivities(opts: {
     syncLinearTicketStateActivity: async () => {},
     persistWorkflowRunStart: async () => {},
     persistWorkflowRunTransition: async () => {},
+    recordAttempt: async (_input: RecordAttemptInput) => {},
     validateRepoSlug: async () => {},
     launchWorkerContainer: async (
       input: LaunchWorkerContainerInput,

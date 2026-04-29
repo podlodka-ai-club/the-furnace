@@ -27,7 +27,12 @@ const TEST_REPO_QUEUE = taskQueueForRepo(TEST_REPO_SLUG);
 
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.resolve(TESTS_DIR, "..", "..");
-const REAL_WORKER_ENTRY = path.join(SERVER_DIR, "src", "worker-entry.ts");
+// Container-lifecycle tests use the test entry (fixtures/test-worker-entry.ts)
+// because the production runSpecPhase now drives the Claude Agent SDK and
+// requires Linear/DB infrastructure these lifecycle tests don't provide. The
+// test entry exposes the same `runContainerWorker` boot sequence with fast
+// noop phase activities, so these tests still exercise the real worker
+// lifecycle (spawn, register, claim task, shutdown) without the spec body.
 const TEST_WORKER_ENTRY = path.join(TESTS_DIR, "fixtures", "test-worker-entry.ts");
 const TSX_BIN = path.join(SERVER_DIR, "node_modules", ".bin", "tsx");
 
@@ -78,7 +83,7 @@ function buildOrchestratorActivities(
   state: OrchestratorState,
   overrides: Partial<TemporalWorkerActivities> = {},
   launchBehavior: (input: LaunchWorkerContainerInput) => SpawnedChild | null = (input) => {
-    const c = spawnChildWorker(input, REAL_WORKER_ENTRY);
+    const c = spawnChildWorker(input, TEST_WORKER_ENTRY);
     return c;
   },
 ): Partial<TemporalWorkerActivities> {
@@ -88,6 +93,7 @@ function buildOrchestratorActivities(
     syncLinearTicketStateActivity: async () => {},
     persistWorkflowRunStart: async () => {},
     persistWorkflowRunTransition: async () => {},
+    recordAttempt: async () => {},
     validateRepoSlug: async ({ slug }) => {
       state.validateCalls.push(slug);
     },
@@ -200,7 +206,7 @@ describe("container-as-worker lifecycle", () => {
           WORKER_TEST_BEHAVIOR: "block",
         });
       }
-      return spawnChildWorker(input, REAL_WORKER_ENTRY);
+      return spawnChildWorker(input, TEST_WORKER_ENTRY);
     };
 
     orchTaskQueue = `${TEMPORAL_TASK_QUEUE}-84-${randomUUID()}`;
@@ -255,7 +261,7 @@ describe("container-as-worker lifecycle", () => {
           attemptId: `${buildPerTicketWorkflowId(ticketId)}:spec:recovery`,
           repoSlug: TEST_REPO_SLUG,
         },
-        REAL_WORKER_ENTRY,
+        TEST_WORKER_ENTRY,
       );
       sharedState.spawned.push(recovery);
 

@@ -3,23 +3,20 @@ import {
   type CoderPhaseOutput,
   type ReviewResult,
   type ReviewerInput,
-  type ReviewerTicket,
   type SpecPhaseOutput,
   coderPhaseOutputSchema,
   reviewResultSchema,
   reviewerInputSchema,
-  reviewerTicketSchema,
   specPhaseOutputSchema,
 } from "../../agents/contracts/index.js";
-import { z } from "zod";
+import {
+  runSpecPhase as runSpecPhaseImpl,
+  specPhaseInputSchema,
+} from "../../agents/spec/activity.js";
+import type { SpecPhaseInput } from "../../agents/spec/activity.js";
 
-export const specPhaseInputSchema = z.object({
-  ticket: reviewerTicketSchema,
-});
-
-export interface SpecPhaseInput {
-  ticket: ReviewerTicket;
-}
+export { specPhaseInputSchema };
+export type { SpecPhaseInput };
 
 // Heartbeat once at the start of each no-op phase so the activity body is on
 // record with Temporal as a heartbeat-emitting activity. Real phase bodies
@@ -35,24 +32,9 @@ function heartbeatStart(detail: Record<string, unknown>): void {
   }
 }
 
-export async function runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput> {
-  const validatedInput = specPhaseInputSchema.parse(input);
-  heartbeatStart({ phase: "spec", ticketId: validatedInput.ticket.id });
-  console.info("runSpecPhase noop", { ticketId: validatedInput.ticket.id });
-
-  const output = {
-    featureBranch: `agent/spec-${validatedInput.ticket.identifier.toLowerCase()}`,
-    testCommits: [
-      {
-        sha: "a".repeat(40),
-        path: "server/tests/integration/ticket.acceptance.test.ts",
-        description: `Failing acceptance tests for ${validatedInput.ticket.identifier}`,
-      },
-    ],
-  };
-
-  return specPhaseOutputSchema.parse(output);
-}
+// Real spec activity body lives in `agents/spec/activity.ts`. Re-exported here
+// so the worker registry / dispatch wiring keeps importing from the same path.
+export const runSpecPhase = runSpecPhaseImpl;
 
 export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput> {
   const validatedInput = specPhaseOutputSchema.parse(input);

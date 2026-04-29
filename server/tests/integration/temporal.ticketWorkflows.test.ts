@@ -30,6 +30,7 @@ import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
+import type { RecordAttemptInput } from "../../src/temporal/activities/attempts.js";
 
 const TEST_REPO_SLUG = "test-repo";
 const TEST_REPO_QUEUE = taskQueueForRepo(TEST_REPO_SLUG);
@@ -290,6 +291,7 @@ function buildBaseActivities(): TemporalWorkerActivities {
     }),
     persistWorkflowRunStart: async (_input: PersistWorkflowRunStartInput) => {},
     persistWorkflowRunTransition: async (_input: PersistWorkflowRunTransitionInput) => {},
+    recordAttempt: async (_input: RecordAttemptInput) => {},
     launchWorkerContainer: async (
       input: LaunchWorkerContainerInput,
     ): Promise<LaunchWorkerContainerResult> => ({

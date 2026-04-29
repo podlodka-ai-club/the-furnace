@@ -1,4 +1,5 @@
 import {
+  ActivityFailure,
   ApplicationFailure,
   defineQuery,
   defineSignal,
@@ -15,8 +16,11 @@ import type {
 import type * as linearActivities from "../activities/linear.js";
 import type * as workflowRunActivities from "../activities/workflow-runs.js";
 import type * as workerLauncherActivities from "../activities/worker-launcher.js";
+import type * as attemptsActivities from "../activities/attempts.js";
 import type { LaunchWorkerContainerResult } from "../activities/worker-launcher.js";
 import { phaseActivitiesForRepo } from "../dispatch.js";
+
+const SPEC_AC_CLARIFICATION_FAILURE_TYPE = "AcClarificationRequested";
 
 export const PER_TICKET_WORKFLOW_NAME = "perTicketWorkflow";
 
@@ -79,6 +83,19 @@ const { validateRepoSlug } = proxyActivities<typeof workerLauncherActivities>({
   },
 });
 
+// recordAttempt is registered ONLY on the orchestrator worker (PGLite is
+// in-process there). Per-repo container workers cannot reach it. See
+// `openspec/changes/spec-agent/design.md` §6 for the wiring rationale.
+const { recordAttempt } = proxyActivities<typeof attemptsActivities>({
+  startToCloseTimeout: "30 seconds",
+  retry: {
+    initialInterval: "1 second",
+    backoffCoefficient: 2,
+    maximumInterval: "10 seconds",
+    maximumAttempts: 3,
+  },
+});
+
 export async function perTicketWorkflow(
   input: PerTicketWorkflowInput,
 ): Promise<PerTicketWorkflowResult> {
@@ -120,7 +137,7 @@ export async function perTicketWorkflow(
     stateName: "In Progress",
   });
 
-  const specOutput = await runPhase("spec", () => runSpecPhase({ ticket: input.ticket }));
+  const specOutput = await runSpecPhaseWithRecording();
   if (specOutput === null) {
     return { status: "cancelled" };
   }
@@ -149,6 +166,84 @@ export async function perTicketWorkflow(
     status: "succeeded",
   });
   return { status: "succeeded" };
+
+  async function runSpecPhaseWithRecording(): Promise<SpecPhaseOutput | null> {
+    if (cancelled) {
+      await transitionToCancelled();
+      return null;
+    }
+
+    currentPhase = "spec";
+    attemptCount += 1;
+    const attemptIndex = attemptCount - 1;
+    await persistWorkflowRunTransition({
+      workflowId: workflowInfo().workflowId,
+      status: "running",
+    });
+
+    const launch: LaunchWorkerContainerResult = await launchWorkerContainer({
+      ticketId: input.ticket.id,
+      phase: "spec",
+      attemptId: `${workflowInfo().workflowId}:spec:${attemptCount}`,
+      repoSlug: input.targetRepoSlug,
+    });
+    void launch;
+
+    await recordAttempt({
+      workflowId: workflowInfo().workflowId,
+      phase: "spec",
+      attemptIndex,
+      outcome: "pending",
+    });
+
+    let output: SpecPhaseOutput;
+    try {
+      output = await runSpecPhase({ ticket: input.ticket });
+    } catch (err) {
+      if (isAcClarificationFailure(err)) {
+        await recordAttempt({
+          workflowId: workflowInfo().workflowId,
+          phase: "spec",
+          attemptIndex,
+          outcome: "stuck",
+        });
+        // Persist run as failed; the structured failure detail (subTicketRef)
+        // is preserved in Temporal's workflow event history via the rethrown
+        // ApplicationFailure. We deliberately do NOT sync the Linear ticket
+        // to "Canceled" — it must remain "In Progress" so a human can
+        // resolve the clarification.
+        await persistWorkflowRunTransition({
+          workflowId: workflowInfo().workflowId,
+          status: "failed",
+        });
+        throw err;
+      }
+      await recordAttempt({
+        workflowId: workflowInfo().workflowId,
+        phase: "spec",
+        attemptIndex,
+        outcome: "failed",
+      });
+      throw err;
+    }
+
+    // Match the original phase-cancel timing: check cancel immediately after
+    // the gated activity returns and before any further activity dispatches.
+    // If we're cancelled, leave the attempts row at `pending` and tear down.
+    if (cancelled) {
+      await transitionToCancelled();
+      return null;
+    }
+
+    await recordAttempt({
+      workflowId: workflowInfo().workflowId,
+      phase: "spec",
+      attemptIndex,
+      outcome: "passed",
+    });
+
+    return output;
+  }
 
   async function runPhase<T>(phase: "spec" | "coder" | "review", fn: () => Promise<T>): Promise<T | null> {
     if (cancelled) {
@@ -198,6 +293,24 @@ export async function perTicketWorkflow(
 
 export function buildPerTicketWorkflowId(ticketId: string): string {
   return `ticket-${ticketId}`;
+}
+
+// Activities that throw `ApplicationFailure.nonRetryable(..., type, details)`
+// surface in workflows as `ActivityFailure` with `cause` set to the
+// `ApplicationFailure`. We also accept a bare `ApplicationFailure` for
+// completeness (e.g. when the failure originates from inside a child workflow
+// or is rethrown manually).
+function isAcClarificationFailure(err: unknown): boolean {
+  if (err instanceof ApplicationFailure && err.type === SPEC_AC_CLARIFICATION_FAILURE_TYPE) {
+    return true;
+  }
+  if (err instanceof ActivityFailure) {
+    const cause = err.cause;
+    if (cause instanceof ApplicationFailure && cause.type === SPEC_AC_CLARIFICATION_FAILURE_TYPE) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export type { CoderPhaseOutput, SpecPhaseOutput };

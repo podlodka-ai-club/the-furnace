@@ -1,10 +1,7 @@
 node_modules/
 dist/
 build/*
-!build/repos.json
-!build/*/
-!build/*/manifest.json
-build/*/manifest.local.json
+!build/repos.example.json
 coverage/
 .nyc_output/
 

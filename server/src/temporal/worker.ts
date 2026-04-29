@@ -11,6 +11,7 @@ import * as helloActivities from "./activities/hello.js";
 import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
 import * as workflowRunActivities from "./activities/workflow-runs.js";
+import * as attemptsActivities from "./activities/attempts.js";
 import * as workerLauncherActivities from "./activities/worker-launcher.js";
 import type { SpecPhaseInput } from "./activities/phases.js";
 import type { SyncLinearTicketStateInput } from "./activities/linear.js";
@@ -18,6 +19,7 @@ import type {
   PersistWorkflowRunStartInput,
   PersistWorkflowRunTransitionInput,
 } from "./activities/workflow-runs.js";
+import type { RecordAttemptInput } from "./activities/attempts.js";
 import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
@@ -45,6 +47,7 @@ export interface TemporalWorkerActivities {
   runReviewPhase(input: ReviewerInput): Promise<ReviewResult>;
   persistWorkflowRunStart(input: PersistWorkflowRunStartInput): Promise<void>;
   persistWorkflowRunTransition(input: PersistWorkflowRunTransitionInput): Promise<void>;
+  recordAttempt(input: RecordAttemptInput): Promise<void>;
   launchWorkerContainer(input: LaunchWorkerContainerInput): Promise<LaunchWorkerContainerResult>;
   validateRepoSlug(input: { slug: string }): Promise<void>;
 }
@@ -53,6 +56,7 @@ const orchestratorOnlyActivities = {
   ...helloActivities,
   ...linearActivities,
   ...workflowRunActivities,
+  ...attemptsActivities,
   ...workerLauncherActivities,
 };
 

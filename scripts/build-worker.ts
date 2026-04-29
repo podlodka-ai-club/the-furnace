@@ -22,6 +22,8 @@ interface BuildOptions {
 }
 
 const RUNTIME_DEPS: ReadonlyArray<readonly [string, string]> = [
+  ["@anthropic-ai/claude-agent-sdk", "^0.1.0"],
+  ["@linear/sdk", "^82.1.0"],
   ["@temporalio/worker", "^1.16.1"],
   ["@temporalio/activity", "^1.16.1"],
   ["zod", "^4.3.6"],
