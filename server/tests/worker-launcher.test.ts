@@ -39,6 +39,33 @@ async function runLauncherCapturingArgs(
 const credsMountPattern = /^type=bind,source=.+,target=\/root\/\.claude,readonly$/;
 
 describe("launchWorkerContainer docker args", () => {
+  it("uses REPO_ROOT override for default build and bundle dirs", async () => {
+    const repoRoot = "/tmp/custom-repo-root";
+    let capturedBuildDir = "";
+    let captured: string[] = [];
+
+    await launchWorkerContainer(baseInput, {
+      env: {
+        REPO_ROOT: repoRoot,
+        CLAUDE_CREDS_DIR: "/tmp/creds",
+      },
+      loadManifest: async (_slug, buildDir) => {
+        capturedBuildDir = buildDir;
+        return { imageRef: "registry.example/test@sha256:abc" };
+      },
+      runDocker: async (args) => {
+        captured = args;
+        return { containerId: "fake-container" };
+      },
+    });
+
+    expect(capturedBuildDir).toBe(path.join(repoRoot, "build"));
+    const mountValues = collectMountValues(captured);
+    expect(mountValues).toContain(
+      `type=bind,source=${path.join(repoRoot, "dist", "worker")},target=/opt/furnace,readonly`,
+    );
+  });
+
   it("forwards ANTHROPIC_API_KEY env var alongside the credentials mount", async () => {
     const args = await runLauncherCapturingArgs({
       WORKER_BUNDLE_DIR: "/tmp/bundle",

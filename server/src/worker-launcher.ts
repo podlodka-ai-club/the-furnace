@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { taskQueueForRepo } from "./temporal/repo-slug.js";
 
@@ -34,6 +35,10 @@ interface LauncherEnv {
 
 interface ManifestRead {
   imageRef: string;
+}
+
+function resolveDefaultRepoRoot(): string {
+  return fileURLToPath(new URL("../..", import.meta.url));
 }
 
 export interface LaunchWorkerContainerOptions {
@@ -89,6 +94,9 @@ export async function launchWorkerContainer(
 }
 
 function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
+  const repoRoot = env.REPO_ROOT && env.REPO_ROOT.length > 0
+    ? env.REPO_ROOT
+    : resolveDefaultRepoRoot();
   const temporalAddress = env.TEMPORAL_ADDRESS ?? "localhost:7233";
   const rawOauth = env.CLAUDE_CODE_OAUTH_TOKEN;
   const rawAnthropic = env.ANTHROPIC_API_KEY;
@@ -96,9 +104,9 @@ function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
     temporalAddress,
     containerTemporalAddress: env.CONTAINER_TEMPORAL_ADDRESS ?? temporalAddress,
     temporalNamespace: env.TEMPORAL_NAMESPACE ?? "default",
-    workerBundleDir: env.WORKER_BUNDLE_DIR ?? path.resolve(process.cwd(), "dist", "worker"),
+    workerBundleDir: env.WORKER_BUNDLE_DIR ?? path.join(repoRoot, "dist", "worker"),
     claudeCredsDir: env.CLAUDE_CREDS_DIR ?? path.join(os.homedir(), ".claude"),
-    buildDir: env.BUILD_DIR ?? path.resolve(process.cwd(), "build"),
+    buildDir: env.BUILD_DIR ?? path.join(repoRoot, "build"),
     claudeCodeOauthToken: rawOauth && rawOauth.length > 0 ? rawOauth : null,
     anthropicApiKey: rawAnthropic && rawAnthropic.length > 0 ? rawAnthropic : null,
   };
