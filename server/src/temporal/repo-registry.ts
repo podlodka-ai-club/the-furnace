@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { RepoSlug } from "./repo-slug.js";
 
@@ -29,8 +30,12 @@ function defaultReposPath(repoRoot: string): string {
   return path.join(repoRoot, "build", "repos.json");
 }
 
+function resolveDefaultRepoRoot(): string {
+  return fileURLToPath(new URL("../../..", import.meta.url));
+}
+
 export async function loadRepoSlugRegistry(
-  repoRoot: string = process.cwd(),
+  repoRoot: string = resolveDefaultRepoRoot(),
 ): Promise<RepoSlugRegistryEntry[]> {
   const reposPath = defaultReposPath(repoRoot);
   const raw = await readFile(reposPath, "utf8");
@@ -68,7 +73,7 @@ export function assertRepoSlug(value: string, registry: RepoSlugRegistryEntry[])
 
 export async function resolveRepoSlug(
   value: string,
-  repoRoot: string = process.cwd(),
+  repoRoot: string = resolveDefaultRepoRoot(),
 ): Promise<RepoSlug> {
   const registry = await loadRepoSlugRegistry(repoRoot);
   return assertRepoSlug(value, registry);

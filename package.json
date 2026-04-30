@@ -5,8 +5,8 @@
   "description": "Autonomous coding agent system orchestrated via Temporal workflows.",
   "scripts": {
     "dev": "npm run --prefix server dev",
-    "build:devcontainer": "tsx --env-file=.env scripts/build-devcontainer-image.ts",
-    "build:worker": "tsx --env-file=.env scripts/build-worker.ts",
+    "build:devcontainer": "tsx --env-file=server/.env scripts/build-devcontainer-image.ts",
+    "build:worker": "tsx --env-file=server/.env scripts/build-worker.ts",
     "test": "npm run --prefix server test && npm run test:devcontainer",
     "test:devcontainer": "npm run --prefix server test -- --root .. tests/devcontainer-image-build.test.ts",
     "test:devcontainer:e2e": "tsx scripts/test-devcontainer-image-e2e.ts",
