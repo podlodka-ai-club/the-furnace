@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { commitShaSchema, diffStatSchema, testRunSummarySchema } from "./shared.js";
+import { commitShaSchema, diffManifestSchema, diffStatSchema, testRunSummarySchema } from "./shared.js";
 
 export const reviewerTicketSchema = z.object({
   id: z.string().min(1),
@@ -11,6 +11,7 @@ export const reviewerInputSchema = z.object({
   ticket: reviewerTicketSchema,
   featureBranch: z.string().min(1),
   finalCommitSha: commitShaSchema,
+  diffManifest: diffManifestSchema,
   diffStat: diffStatSchema,
   testRunSummary: testRunSummarySchema,
 });

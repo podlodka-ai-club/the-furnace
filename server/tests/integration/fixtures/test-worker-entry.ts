@@ -40,8 +40,14 @@ async function slowSpecPhase(input: TestSpecInput): Promise<unknown> {
 
 async function fastCoderPhase(input: { featureBranch: string }): Promise<unknown> {
   return {
+    status: "success",
     featureBranch: input.featureBranch,
     finalCommitSha: "c".repeat(40),
+    diffManifest: {
+      baseCommitSha: "b".repeat(40),
+      headCommitSha: "c".repeat(40),
+      files: [{ path: "server/src/app.ts", changeType: "M" }],
+    },
     diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
     testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
   };

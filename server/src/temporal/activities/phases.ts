@@ -4,16 +4,15 @@ import {
   type ReviewResult,
   type ReviewerInput,
   type SpecPhaseOutput,
-  coderPhaseOutputSchema,
   reviewResultSchema,
   reviewerInputSchema,
-  specPhaseOutputSchema,
 } from "../../agents/contracts/index.js";
 import {
   runSpecPhase as runSpecPhaseImpl,
   specPhaseInputSchema,
 } from "../../agents/spec/activity.js";
 import type { SpecPhaseInput } from "../../agents/spec/activity.js";
+import { runCoderPhase as runCoderPhaseImpl } from "../../agents/coder/activity.js";
 
 export { specPhaseInputSchema };
 export type { SpecPhaseInput };
@@ -35,30 +34,7 @@ function heartbeatStart(detail: Record<string, unknown>): void {
 // Real spec activity body lives in `agents/spec/activity.ts`. Re-exported here
 // so the worker registry / dispatch wiring keeps importing from the same path.
 export const runSpecPhase = runSpecPhaseImpl;
-
-export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput> {
-  const validatedInput = specPhaseOutputSchema.parse(input);
-  heartbeatStart({ phase: "coder", featureBranch: validatedInput.featureBranch });
-  console.info("runCoderPhase noop", { featureBranch: validatedInput.featureBranch });
-
-  const output = {
-    featureBranch: validatedInput.featureBranch,
-    finalCommitSha: "b".repeat(40),
-    diffStat: {
-      filesChanged: 1,
-      insertions: 10,
-      deletions: 0,
-    },
-    testRunSummary: {
-      total: 1,
-      passed: 1,
-      failed: 0,
-      durationMs: 1000,
-    },
-  };
-
-  return coderPhaseOutputSchema.parse(output);
-}
+export const runCoderPhase = runCoderPhaseImpl;
 
 export async function runReviewPhase(input: ReviewerInput): Promise<ReviewResult> {
   const validatedInput = reviewerInputSchema.parse(input);

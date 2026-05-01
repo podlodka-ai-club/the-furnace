@@ -9,6 +9,8 @@ import {
 } from "@temporalio/workflow";
 import type {
   CoderPhaseOutput,
+  CoderStuckOutput,
+  CoderSuccessOutput,
   ReviewerInput,
   ReviewerTicket,
   SpecPhaseOutput,
@@ -18,9 +20,11 @@ import type * as workflowRunActivities from "../activities/workflow-runs.js";
 import type * as workerLauncherActivities from "../activities/worker-launcher.js";
 import type * as attemptsActivities from "../activities/attempts.js";
 import type { LaunchWorkerContainerResult } from "../activities/worker-launcher.js";
-import { phaseActivitiesForRepo } from "../dispatch.js";
+import { coderActivityForRepo, phaseActivitiesForRepo } from "../dispatch.js";
+import { coderPhaseOutputSchema } from "../../agents/contracts/index.js";
 
 const SPEC_AC_CLARIFICATION_FAILURE_TYPE = "AcClarificationRequested";
+const CODER_BLOCKED_FAILURE_TYPE = "CoderPhaseBlocked";
 
 export const PER_TICKET_WORKFLOW_NAME = "perTicketWorkflow";
 
@@ -124,9 +128,10 @@ export async function perTicketWorkflow(
   // any container launch.
   await validateRepoSlug({ slug: input.targetRepoSlug });
 
-  const { runSpecPhase, runCoderPhase, runReviewPhase } = phaseActivitiesForRepo(
+  const { runSpecPhase, runReviewPhase } = phaseActivitiesForRepo(
     input.targetRepoSlug,
   );
+  const { runCoderPhase } = coderActivityForRepo(input.targetRepoSlug);
 
   await persistWorkflowRunStart({
     workflowId: workflowInfo().workflowId,
@@ -142,14 +147,31 @@ export async function perTicketWorkflow(
     return { status: "cancelled" };
   }
 
-  const coderOutput = await runPhase("coder", () => runCoderPhase(specOutput));
+  const coderOutput = await runCoderPhaseWithRetries(specOutput);
   if (coderOutput === null) {
     return { status: "cancelled" };
   }
 
+  if (coderOutput.status === "stuck") {
+    await persistWorkflowRunTransition({
+      workflowId: workflowInfo().workflowId,
+      status: "failed",
+    });
+    throw ApplicationFailure.nonRetryable(
+      `Coder blocked with ${coderOutput.stuckType}`,
+      CODER_BLOCKED_FAILURE_TYPE,
+      { coderOutput },
+    );
+  }
+
+  const successOutput = coderOutput as CoderSuccessOutput;
   const reviewerInput: ReviewerInput = {
-    ...coderOutput,
     ticket: input.ticket,
+    featureBranch: successOutput.featureBranch,
+    finalCommitSha: successOutput.finalCommitSha,
+    diffManifest: successOutput.diffManifest,
+    diffStat: successOutput.diffStat,
+    testRunSummary: successOutput.testRunSummary,
   };
   const reviewOutput = await runPhase("review", () => runReviewPhase(reviewerInput));
   if (reviewOutput === null) {
@@ -253,6 +275,7 @@ export async function perTicketWorkflow(
 
     currentPhase = phase;
     attemptCount += 1;
+    const attemptIndex = attemptCount - 1;
     await persistWorkflowRunTransition({
       workflowId: workflowInfo().workflowId,
       status: "running",
@@ -268,14 +291,72 @@ export async function perTicketWorkflow(
     });
     void launch;
 
-    const output = await fn();
+    if (phase === "coder") {
+      await recordAttempt({
+        workflowId: workflowInfo().workflowId,
+        phase: "coder",
+        attemptIndex,
+        outcome: "pending",
+      });
+    }
+
+    let output: T;
+    try {
+      output = await fn();
+    } catch (err) {
+      if (phase === "coder") {
+        const stuck = extractCoderStuckOutput(err);
+        if (stuck) {
+          await recordAttempt({
+            workflowId: workflowInfo().workflowId,
+            phase: "coder",
+            attemptIndex,
+            outcome: stuck.stuckType,
+          });
+        } else {
+          await recordAttempt({
+            workflowId: workflowInfo().workflowId,
+            phase: "coder",
+            attemptIndex,
+            outcome: "retry",
+          });
+        }
+      }
+      throw err;
+    }
 
     if (cancelled) {
       await transitionToCancelled();
       return null;
     }
 
+    if (phase === "coder") {
+      await recordAttempt({
+        workflowId: workflowInfo().workflowId,
+        phase: "coder",
+        attemptIndex,
+        outcome: "tests-green",
+      });
+    }
+
     return output;
+  }
+
+  async function runCoderPhaseWithRetries(specOutput: SpecPhaseOutput): Promise<CoderPhaseOutput | null> {
+    const maxAttempts = 3;
+    let lastErr: unknown;
+    for (let i = 0; i < maxAttempts; i += 1) {
+      try {
+        const output = await runPhase("coder", () => runCoderPhase(specOutput));
+        return output;
+      } catch (err) {
+        lastErr = err;
+        if (extractCoderStuckOutput(err)) {
+          throw err;
+        }
+      }
+    }
+    throw lastErr;
   }
 
   async function transitionToCancelled(): Promise<void> {
@@ -289,6 +370,19 @@ export async function perTicketWorkflow(
       status: "cancelled",
     });
   }
+}
+
+function extractCoderStuckOutput(err: unknown): CoderStuckOutput | null {
+  const application = err instanceof ActivityFailure
+    ? (err.cause instanceof ApplicationFailure ? err.cause : null)
+    : (err instanceof ApplicationFailure ? err : null);
+  if (!application) return null;
+  const details = application.details as unknown;
+  if (!Array.isArray(details) || details.length === 0) return null;
+  const maybe = (details[0] as { coderOutput?: unknown }).coderOutput;
+  const parsed = coderPhaseOutputSchema.safeParse(maybe);
+  if (!parsed.success || parsed.data.status !== "stuck") return null;
+  return parsed.data;
 }
 
 export function buildPerTicketWorkflowId(ticketId: string): string {
@@ -314,3 +408,4 @@ function isAcClarificationFailure(err: unknown): boolean {
 }
 
 export type { CoderPhaseOutput, SpecPhaseOutput };
+export type { CoderStuckOutput, CoderSuccessOutput };

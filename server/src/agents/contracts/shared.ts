@@ -37,3 +37,17 @@ export const testRunSummarySchema = z
 export type TestRunSummary = z.infer<typeof testRunSummarySchema>;
 
 export const commitShaSchema = z.string().regex(shaPattern, "Expected a 40-character git SHA");
+
+export const diffManifestFileSchema = z.object({
+  path: z.string().min(1),
+  changeType: z.enum(["A", "M", "D", "R"]),
+});
+
+export const diffManifestSchema = z.object({
+  baseCommitSha: commitShaSchema,
+  headCommitSha: commitShaSchema,
+  files: z.array(diffManifestFileSchema),
+});
+
+export type DiffManifestFile = z.infer<typeof diffManifestFileSchema>;
+export type DiffManifest = z.infer<typeof diffManifestSchema>;

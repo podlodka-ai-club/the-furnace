@@ -14,9 +14,18 @@ import type { AttemptOutcome, AttemptPhase } from "../../db/types.js";
 
 export const recordAttemptInputSchema = z.object({
   workflowId: z.string().min(1),
-  phase: z.enum(["spec", "code", "review"]),
+  phase: z.enum(["spec", "code", "coder", "review"]),
   attemptIndex: z.number().int().nonnegative(),
-  outcome: z.enum(["pending", "passed", "failed", "stuck"]),
+  outcome: z.enum([
+    "pending",
+    "passed",
+    "failed",
+    "stuck",
+    "tests-green",
+    "retry",
+    "dep-missing",
+    "design-question",
+  ]),
 });
 
 export interface RecordAttemptInput {

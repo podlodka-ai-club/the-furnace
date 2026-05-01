@@ -68,8 +68,14 @@ describe("Temporal spec phase recording", () => {
         // either pollution (different workflow) or a bug.
         recorded.phaseCalls.push({ ticketId: "<unknown>", phase: "coder" });
         return {
+          status: "success" as const,
           featureBranch: input.featureBranch,
           finalCommitSha: "c".repeat(40),
+          diffManifest: {
+            baseCommitSha: "b".repeat(40),
+            headCommitSha: "c".repeat(40),
+            files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+          },
           diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
           testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
         };
@@ -159,8 +165,14 @@ describe("Temporal spec phase recording", () => {
         const isMine = input.featureBranch === featureBranchForTicket;
         recorded.phaseCalls.push({ ticketId: isMine ? ticketId : "<other>", phase: "coder" });
         return {
+          status: "success" as const,
           featureBranch: input.featureBranch,
           finalCommitSha: "c".repeat(40),
+          diffManifest: {
+            baseCommitSha: "b".repeat(40),
+            headCommitSha: "c".repeat(40),
+            files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+          },
           diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
           testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
         };
@@ -230,8 +242,14 @@ describe("Temporal spec phase recording", () => {
       runCoderPhase: async (input: SpecPhaseOutput) => {
         recorded.phaseCalls.push({ ticketId: "<unknown>", phase: "coder" });
         return {
+          status: "success" as const,
           featureBranch: input.featureBranch,
           finalCommitSha: "c".repeat(40),
+          diffManifest: {
+            baseCommitSha: "b".repeat(40),
+            headCommitSha: "c".repeat(40),
+            files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+          },
           diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
           testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
         };
@@ -283,6 +301,207 @@ describe("Temporal spec phase recording", () => {
     expect(specOutcomes).toEqual(["pending", "failed"]);
     expect(myAttempts.some((a) => a.outcome === "passed")).toBe(false);
     expect(myAttempts.some((a) => a.outcome === "stuck")).toBe(false);
+  }, 30_000);
+
+  it("coder retry path: records retry then tests-green and proceeds to review", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const ticketId = `issue_${randomUUID()}`;
+    const workflowId = buildPerTicketWorkflowId(ticketId);
+    const recorded: RecordedCalls = {
+      recordAttempt: [],
+      transitions: [],
+      syncCalls: [],
+      phaseCalls: [],
+    };
+
+    let coderCalls = 0;
+    const featureBranchForTicket = `agent/spec-eng-400-${ticketId}`;
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        recorded.phaseCalls.push({ ticketId: input.ticket.id, phase: "spec" });
+        return {
+          featureBranch: featureBranchForTicket,
+          testCommits: [{ sha: "a".repeat(40), path: "tests/x.test.ts", description: "covers feature X" }],
+        };
+      },
+      runCoderPhase: async (input: SpecPhaseOutput) => {
+        const isMine = input.featureBranch === featureBranchForTicket;
+        recorded.phaseCalls.push({ ticketId: isMine ? ticketId : "<other>", phase: "coder" });
+        coderCalls += 1;
+        if (coderCalls === 1) {
+          throw new Error("transient coder failure");
+        }
+        return {
+          status: "success" as const,
+          featureBranch: input.featureBranch,
+          finalCommitSha: "c".repeat(40),
+          diffManifest: {
+            baseCommitSha: "b".repeat(40),
+            headCommitSha: "c".repeat(40),
+            files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+          },
+          diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+          testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+        };
+      },
+      runReviewPhase: async (input: ReviewerInput) => {
+        recorded.phaseCalls.push({ ticketId: input.ticket.id, phase: "review" });
+        return { verdict: "approve" as const, reasoning: "ok", findings: [] };
+      },
+    };
+
+    const activities = buildBaseActivities(recorded, phaseActivities);
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [{ ticket: { id: ticketId, identifier: "ENG-400", title: "Coder retry ticket" }, targetRepoSlug: TEST_REPO_SLUG }],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId,
+        });
+        await expect(handle.result()).resolves.toEqual({ status: "succeeded" });
+      });
+    });
+
+    const myAttempts = recorded.recordAttempt.filter((a) => a.workflowId === workflowId && a.phase === "coder");
+    expect(myAttempts.map((a) => a.outcome)).toEqual(["pending", "retry", "pending", "tests-green"]);
+  }, 30_000);
+
+  it("coder dep-missing path: records dep-missing and fails non-retryable before review", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const ticketId = `issue_${randomUUID()}`;
+    const workflowId = buildPerTicketWorkflowId(ticketId);
+    const recorded: RecordedCalls = {
+      recordAttempt: [],
+      transitions: [],
+      syncCalls: [],
+      phaseCalls: [],
+    };
+
+    const featureBranchForTicket = `agent/spec-eng-401-${ticketId}`;
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => ({
+        featureBranch: featureBranchForTicket,
+        testCommits: [{ sha: "a".repeat(40), path: "tests/x.test.ts", description: "covers feature X" }],
+      }),
+      runCoderPhase: async (input: SpecPhaseOutput) => {
+        const isMine = input.featureBranch === featureBranchForTicket;
+        recorded.phaseCalls.push({ ticketId: isMine ? ticketId : "<other>", phase: "coder" });
+        throw ApplicationFailure.nonRetryable("blocked", "CoderPhaseBlocked", {
+          coderOutput: {
+            status: "stuck",
+            featureBranch: input.featureBranch,
+            stuckType: "dep-missing",
+            subTicket: { id: "sub_1", identifier: "ENG-401", title: "dep-missing" },
+          },
+        });
+      },
+      runReviewPhase: async (input: ReviewerInput) => {
+        recorded.phaseCalls.push({ ticketId: input.ticket.id, phase: "review" });
+        return { verdict: "approve" as const, reasoning: "ok", findings: [] };
+      },
+    };
+
+    const activities = buildBaseActivities(recorded, phaseActivities);
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({ taskQueue: TEST_REPO_QUEUE, activities: phaseActivities });
+
+    let workflowError: unknown;
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [{ ticket: { id: ticketId, identifier: "ENG-401", title: "Dep missing" }, targetRepoSlug: TEST_REPO_SLUG }],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId,
+        });
+        try {
+          await handle.result();
+        } catch (err) {
+          workflowError = err;
+        }
+      });
+    });
+
+    expect(workflowError).toBeDefined();
+    const myAttempts = recorded.recordAttempt.filter((a) => a.workflowId === workflowId && a.phase === "coder");
+    expect(myAttempts.map((a) => a.outcome)).toEqual(["pending", "dep-missing"]);
+    const myPhaseCalls = recorded.phaseCalls.filter((c) => c.ticketId === ticketId);
+    expect(myPhaseCalls.map((c) => c.phase)).toEqual(["coder"]);
+  }, 30_000);
+
+  it("coder design-question path: records design-question and fails non-retryable before review", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const ticketId = `issue_${randomUUID()}`;
+    const workflowId = buildPerTicketWorkflowId(ticketId);
+    const recorded: RecordedCalls = {
+      recordAttempt: [],
+      transitions: [],
+      syncCalls: [],
+      phaseCalls: [],
+    };
+
+    const featureBranchForTicket = `agent/spec-eng-402-${ticketId}`;
+    const phaseActivities = {
+      runSpecPhase: async (_input: SpecPhaseInput) => ({
+        featureBranch: featureBranchForTicket,
+        testCommits: [{ sha: "a".repeat(40), path: "tests/x.test.ts", description: "covers feature X" }],
+      }),
+      runCoderPhase: async (input: SpecPhaseOutput) => {
+        const isMine = input.featureBranch === featureBranchForTicket;
+        recorded.phaseCalls.push({ ticketId: isMine ? ticketId : "<other>", phase: "coder" });
+        throw ApplicationFailure.nonRetryable("blocked", "CoderPhaseBlocked", {
+          coderOutput: {
+            status: "stuck",
+            featureBranch: input.featureBranch,
+            stuckType: "design-question",
+            subTicket: { id: "sub_2", identifier: "ENG-402", title: "design-question" },
+          },
+        });
+      },
+      runReviewPhase: async (input: ReviewerInput) => {
+        recorded.phaseCalls.push({ ticketId: input.ticket.id, phase: "review" });
+        return { verdict: "approve" as const, reasoning: "ok", findings: [] };
+      },
+    };
+
+    const activities = buildBaseActivities(recorded, phaseActivities);
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({ taskQueue: TEST_REPO_QUEUE, activities: phaseActivities });
+
+    let workflowError: unknown;
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [{ ticket: { id: ticketId, identifier: "ENG-402", title: "Design question" }, targetRepoSlug: TEST_REPO_SLUG }],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId,
+        });
+        try {
+          await handle.result();
+        } catch (err) {
+          workflowError = err;
+        }
+      });
+    });
+
+    expect(workflowError).toBeDefined();
+    const myAttempts = recorded.recordAttempt.filter((a) => a.workflowId === workflowId && a.phase === "coder");
+    expect(myAttempts.map((a) => a.outcome)).toEqual(["pending", "design-question"]);
+    const myPhaseCalls = recorded.phaseCalls.filter((c) => c.ticketId === ticketId);
+    expect(myPhaseCalls.map((c) => c.phase)).toEqual(["coder"]);
   }, 30_000);
 });
 

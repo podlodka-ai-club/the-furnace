@@ -6,21 +6,22 @@ Defines typed phase boundaries for the ticket workflow so no-op and future real 
 ## Requirements
 ### Requirement: Typed Phase Activity Boundaries
 
-The ticket workflow SHALL type phase activity interfaces with canonical contract types (`SpecPhaseOutput`, `CoderPhaseOutput`, and `ReviewResult`) instead of untyped or void payloads.
+The ticket workflow SHALL type phase activity interfaces with canonical contract types (`SpecPhaseOutput`, `CoderPhaseOutput`, and `ReviewResult`) instead of untyped or void payloads, and `CoderPhaseOutput` SHALL represent either a successful diff-manifest result or a typed stuck-with-sub-ticket result.
 
 #### Scenario: Workflow phase signatures use contract types
 
 - **WHEN** developers inspect or compile workflow and activity interfaces
 - **THEN** the spec, coder, and review phase signatures MUST reference canonical inferred contract types
+- **AND** coder output typing MUST support both successful diff-manifest payloads and typed stuck payloads
 
 ### Requirement: No-op Phase Implementations Return Valid Contract Shapes
 
-Coder and review phase implementations that remain as no-op stubs SHALL return placeholder payloads that conform to their corresponding contract schemas. The spec phase no longer falls under this requirement because it has a real implementation.
+Review phase implementations that remain as no-op stubs SHALL return placeholder payloads that conform to their corresponding contract schemas. The spec and coder phases no longer fall under this requirement because they have real implementations.
 
 #### Scenario: Placeholder outputs satisfy contract validation
 
-- **WHEN** the no-op coder or review phase activities execute in the workflow
-- **THEN** each phase output MUST pass its output `schema.parse()` check without schema errors
+- **WHEN** the no-op review phase activity executes in the workflow
+- **THEN** the phase output MUST pass its output `schema.parse()` check without schema errors
 
 ### Requirement: Poller Workflow Enqueues One Ticket Workflow Per Agent-Ready Todo Ticket
 The system SHALL run a cron-based `LinearPollerWorkflow` that polls Linear for `agent-ready` tickets in `Todo` state and starts a `PerTicketWorkflow` for each discovered ticket using ticket-ID-based idempotency.
@@ -37,7 +38,7 @@ The system SHALL run a cron-based `LinearPollerWorkflow` that polls Linear for `
 
 ### Requirement: Per-Ticket Workflow Runs Three Ordered Phases
 
-The system SHALL execute `PerTicketWorkflow` with three phase activities in strict order: `runSpecPhase`, then `runCoderPhase`, then `runReviewPhase`. The spec phase SHALL be a real activity that produces a feature branch and failing-test commits, while coder and review phases remain no-op stubs until their own changes land.
+The system SHALL execute `PerTicketWorkflow` with three phase activities in strict order: `runSpecPhase`, then `runCoderPhase`, then `runReviewPhase`. The spec and coder phases SHALL be real activities, while review may remain a no-op stub until its own change lands.
 
 #### Scenario: Ticket workflow advances through all phases
 
@@ -45,7 +46,8 @@ The system SHALL execute `PerTicketWorkflow` with three phase activities in stri
 - **THEN** it MUST invoke `runSpecPhase` before `runCoderPhase`
 - **AND** it MUST invoke `runCoderPhase` before `runReviewPhase`
 - **AND** the spec phase MUST execute the real Claude-Agent-SDK-driven activity body, not a no-op
-- **AND** the coder and review phases MAY remain no-op stubs that log and return contract-shaped placeholders
+- **AND** the coder phase MUST execute the real implementation loop that returns either a diff manifest or typed stuck output
+- **AND** the review phase MAY remain a no-op stub that logs and returns a contract-shaped placeholder
 
 ### Requirement: Workflow Records Attempts Row Around Spec Phase
 

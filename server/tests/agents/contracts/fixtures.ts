@@ -30,11 +30,16 @@ export const validSpecPhaseOutput = {
 };
 
 export const validCoderPhaseOutput = {
+  status: "success",
   featureBranch: "agent/spec-eng-123",
   finalCommitSha: "b".repeat(40),
+  diffManifest: {
+    baseCommitSha: "a".repeat(40),
+    headCommitSha: "b".repeat(40),
+    files: [{ path: "server/src/app.ts", changeType: "M" }],
+  },
   diffStat: validDiffStat,
   testRunSummary: validTestRunSummary,
-  escalation: validSubTicketRef,
 };
 
 export const validReviewerInput = {
@@ -45,6 +50,7 @@ export const validReviewerInput = {
   },
   featureBranch: validCoderPhaseOutput.featureBranch,
   finalCommitSha: validCoderPhaseOutput.finalCommitSha,
+  diffManifest: validCoderPhaseOutput.diffManifest,
   diffStat: validCoderPhaseOutput.diffStat,
   testRunSummary: validCoderPhaseOutput.testRunSummary,
 };

@@ -14,6 +14,7 @@ import {
   runSpecPhase,
   specPhaseInputSchema,
 } from "../../../src/temporal/activities/phases.js";
+import { runCoderPhase as runCoderPhaseImpl } from "../../../src/agents/coder/activity.js";
 import type {
   SpecAgentClient,
   SpecAgentDecision,
@@ -129,7 +130,29 @@ describe("phase activities contract boundaries", () => {
       ],
     });
 
-    const output = await runCoderPhase(specOutput);
+    const output = await runCoderPhaseImpl(specOutput, {
+      runCommand: async (command, args) => {
+        if (command === "git" && args[0] === "checkout") return { exitCode: 0, stdout: "", stderr: "" };
+        if (command === "git" && args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
+          return { exitCode: 0, stdout: `${specOutput.featureBranch}\n`, stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD") {
+          return { exitCode: 0, stdout: `${"b".repeat(40)}\n`, stderr: "" };
+        }
+        if (command === "git" && args[0] === "rev-parse" && args[1] === "HEAD^") {
+          return { exitCode: 0, stdout: `${"a".repeat(40)}\n`, stderr: "" };
+        }
+        if (command === "git" && args[0] === "diff" && args[1] === "--name-status") {
+          return { exitCode: 0, stdout: "M server/src/app.ts\n", stderr: "" };
+        }
+        if (command === "git" && args[0] === "show") {
+          return { exitCode: 0, stdout: " 1 file changed, 10 insertions(+), 1 deletion(-)\n", stderr: "" };
+        }
+        throw new Error(`unexpected runCommand: ${command} ${args.join(" ")}`);
+      },
+      executeAgentAttempt: async () => ({ status: "success" }),
+      resolveRepoPath: () => process.cwd(),
+    });
     expect(coderPhaseOutputSchema.parse(output)).toEqual(output);
   });
 
@@ -140,8 +163,14 @@ describe("phase activities contract boundaries", () => {
         identifier: "ENG-123",
         title: "Agent IO contracts",
       },
+      status: "success",
       featureBranch: "agent/spec-eng-123",
       finalCommitSha: "b".repeat(40),
+      diffManifest: {
+        baseCommitSha: "a".repeat(40),
+        headCommitSha: "b".repeat(40),
+        files: [{ path: "server/src/app.ts", changeType: "M" }],
+      },
       diffStat: { filesChanged: 2, insertions: 10, deletions: 1 },
       testRunSummary: { total: 2, passed: 2, failed: 0, durationMs: 1200 },
     });

@@ -5,9 +5,17 @@ export type WorkflowRunStatus =
   | "failed"
   | "cancelled";
 
-export type AttemptPhase = "spec" | "code" | "review";
+export type AttemptPhase = "spec" | "code" | "coder" | "review";
 
-export type AttemptOutcome = "pending" | "passed" | "failed" | "stuck";
+export type AttemptOutcome =
+  | "pending"
+  | "passed"
+  | "failed"
+  | "stuck"
+  | "tests-green"
+  | "retry"
+  | "dep-missing"
+  | "design-question";
 
 export type ReviewPersona = "security" | "performance" | "architect" | "naming";
 

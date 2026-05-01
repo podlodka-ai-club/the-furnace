@@ -1,6 +1,10 @@
 export {
   type CoderPhaseOutput,
+  type CoderStuckOutput,
+  type CoderSuccessOutput,
   coderPhaseOutputSchema,
+  coderStuckOutputSchema,
+  coderSuccessOutputSchema,
 } from "./coder-output.js";
 export {
   type ReviewResult,
@@ -17,10 +21,14 @@ export {
   specTestCommitSchema,
 } from "./spec-output.js";
 export {
+  type DiffManifest,
+  type DiffManifestFile,
   type DiffStat,
   type SubTicketRef,
   type TestRunSummary,
   commitShaSchema,
+  diffManifestFileSchema,
+  diffManifestSchema,
   diffStatSchema,
   subTicketRefSchema,
   testRunSummarySchema,

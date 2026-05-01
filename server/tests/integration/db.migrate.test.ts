@@ -27,11 +27,11 @@ describe("migration runner", () => {
     return dir;
   }
 
-  it("fresh DB applies 0001_initial and creates all core tables", async () => {
+  it("fresh DB applies baseline migrations and creates all core tables", async () => {
     const db = await createDatabase({});
     open.push(db);
     const { applied } = await db.migrate();
-    expect(applied).toEqual(["0001_initial"]);
+    expect(applied).toEqual(["0001_initial", "0002_coder_attempt_outcomes"]);
     const rows = await db.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
     );
@@ -52,7 +52,7 @@ describe("migration runner", () => {
     const db = await createDatabase({});
     open.push(db);
     const first = await db.migrate();
-    expect(first.applied).toEqual(["0001_initial"]);
+    expect(first.applied).toEqual(["0001_initial", "0002_coder_attempt_outcomes"]);
     const second = await db.migrate();
     expect(second.applied).toEqual([]);
   });

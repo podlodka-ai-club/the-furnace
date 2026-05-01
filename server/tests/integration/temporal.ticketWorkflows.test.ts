@@ -105,8 +105,14 @@ describe("Temporal per-ticket workflow orchestration", () => {
         };
       },
       runCoderPhase: async (input: SpecPhaseOutput) => ({
+        status: "success" as const,
         featureBranch: input.featureBranch,
         finalCommitSha: "c".repeat(40),
+        diffManifest: {
+          baseCommitSha: "b".repeat(40),
+          headCommitSha: "c".repeat(40),
+          files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+        },
         diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
         testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
       }),
@@ -197,8 +203,14 @@ describe("Temporal per-ticket workflow orchestration", () => {
       runCoderPhase: async (input: SpecPhaseOutput) => {
         phaseCalls.push("coder");
         return {
+          status: "success" as const,
           featureBranch: input.featureBranch,
           finalCommitSha: "d".repeat(40),
+          diffManifest: {
+            baseCommitSha: "c".repeat(40),
+            headCommitSha: "d".repeat(40),
+            files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+          },
           diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
           testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
         };
@@ -279,8 +291,14 @@ function buildBaseActivities(): TemporalWorkerActivities {
       ],
     }),
     runCoderPhase: async (input: SpecPhaseOutput) => ({
+      status: "success" as const,
       featureBranch: input.featureBranch,
       finalCommitSha: "c".repeat(40),
+      diffManifest: {
+        baseCommitSha: "b".repeat(40),
+        headCommitSha: "c".repeat(40),
+        files: [{ path: "server/src/app.ts", changeType: "M" as const }],
+      },
       diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
       testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
     }),

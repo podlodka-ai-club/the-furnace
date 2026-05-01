@@ -8,6 +8,8 @@ export type PhaseActivities = Pick<
   "runSpecPhase" | "runCoderPhase" | "runReviewPhase"
 >;
 
+export type CoderOnlyActivity = Pick<typeof phaseActivities, "runCoderPhase">;
+
 export const PHASE_ACTIVITY_DEFAULTS: ActivityOptions = {
   startToCloseTimeout: "10 minutes",
   scheduleToStartTimeout: "5 minutes",
@@ -31,6 +33,21 @@ export function phaseActivitiesForRepo(
   return proxyActivities<PhaseActivities>({
     ...PHASE_ACTIVITY_DEFAULTS,
     ...options.overrides,
+    taskQueue: taskQueueForRepo(slug),
+  });
+}
+
+export function coderActivityForRepo(
+  slug: string,
+  options: PhaseActivitiesForRepoOptions = {},
+): CoderOnlyActivity {
+  return proxyActivities<CoderOnlyActivity>({
+    ...PHASE_ACTIVITY_DEFAULTS,
+    ...options.overrides,
+    retry: {
+      ...PHASE_ACTIVITY_DEFAULTS.retry,
+      maximumAttempts: 1,
+    },
     taskQueue: taskQueueForRepo(slug),
   });
 }
