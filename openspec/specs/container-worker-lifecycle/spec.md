@@ -22,7 +22,7 @@ The system SHALL provide `server/src/worker-entry.ts` as the entrypoint executed
 
 ### Requirement: Container worker joins per-repo Temporal task queue
 
-The system SHALL connect the container worker to Temporal using `TEMPORAL_ADDRESS` and `TEMPORAL_NAMESPACE` from the environment, registering only the phase activities (`runSpecPhase`, `runCoderPhase`, `runReviewPhase`) on the task queue named `repo-${WORKER_REPO}-worker`. The worker MUST NOT register workflow modules or orchestrator-only activities (Linear, workflow-run persistence, container launch).
+The system SHALL connect the container worker to Temporal using `TEMPORAL_ADDRESS` and `TEMPORAL_NAMESPACE` from the environment, registering only the phase activities (`runSpecPhase`, `runCoderPhase`, `runReviewPhase`) on the task queue named `repo-${WORKER_REPO}-worker`. The worker MUST NOT register workflow modules or orchestrator-only activities (Linear, ticket state sync, container launch).
 
 #### Scenario: Worker binds to the per-repo queue derived from the slug
 

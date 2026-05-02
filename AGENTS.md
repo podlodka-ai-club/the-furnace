@@ -12,7 +12,7 @@ Instructions for AI coding agents working in this repo.
 
 - Follow the proposal's `What Changes` and `Capabilities` sections — do not expand scope.
 - Run `npm test` from the repo root before declaring work complete.
-- Integration tests must hit PGLite (the dev/test database), not mocks.
+- Integration tests must run against real Temporal (workflow run state lives there), not mocks.
 - Never modify `openspec/concept.md`; amend `proposal.md` if scope shifts.
 
 ## Provenance

@@ -11,7 +11,7 @@ See [`openspec/concept.md`](openspec/concept.md) for the full concept and [`open
 | Runtime | Node.js + TypeScript (ESM) |
 | Orchestration | Temporal (added in `temporal-setup`) |
 | Agent framework | Claude Agent SDK (added with `spec-agent`/`coder-agent`) |
-| Database | PGLite for dev/test, PostgreSQL for prod |
+| Workflow state | Temporal (orchestrator runs without its own database) |
 | Tests | Vitest (unit + Supertest integration) |
 | External integrations | Linear, GitHub, Slack |
 
@@ -35,8 +35,8 @@ LINEAR_STATE_ID_CANCELED=state_xxx
 # Optional poll cadence override (default: 1m)
 TEMPORAL_LINEAR_POLLER_EVERY=1m
 
-# Run the dev server to run migrations and check envs (tsx watch)
-npm run dev
+# DEPRECATED: Run the dev server (tsx watch)
+# npm run dev
 
 # Start local Temporal + UI (required for workflow tests)
 docker compose up -d temporal temporal-ui
@@ -66,6 +66,8 @@ npm run --prefix server test -- tests/integration/linear.test.ts
 ```
 
 When the app worker boots, it ensures a recurring Temporal schedule exists for `linearPollerWorkflow` so `agent-ready` + `Todo` Linear tickets are polled automatically (default every 1 minute).
+
+Workflow run state lives entirely in Temporal — the orchestrator does not run its own database. To inspect history use the Temporal UI (`http://localhost:8233`) or `temporal workflow describe`.
 
 Per-ticket workflow state sync to Linear uses a Temporal activity with retry policy: initial interval `1s`, backoff `2x`, maximum interval `30s`, and maximum attempts `5`. If retries are exhausted, the workflow transition fails and remains visible for operator intervention.
 
@@ -134,7 +136,7 @@ the-furnace/
 ├── server/              # Node backend (Express + Temporal worker)
 │   ├── src/
 │   └── tests/
-├── data/pglite/         # PGLite dev database (gitignored)
+├── data/logs/           # Per-attempt worker logs (gitignored)
 ├── openspec/
 │   ├── concept.md       # Full design concept
 │   ├── roadmap.md       # Phased change list

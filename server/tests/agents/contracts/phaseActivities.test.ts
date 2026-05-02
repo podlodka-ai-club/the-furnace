@@ -103,7 +103,6 @@ describe("phase activities contract boundaries", () => {
         runCommand: run,
         linearClient,
         loadPrompt: async () => "system prompt",
-        fetchTicket: async () => ({ title: "Agent IO contracts", description: "desc" }),
         resolveRepoPath: () => repoPath,
         resolveWorkflowMeta: () => ({
           workflowId: "ticket-test",

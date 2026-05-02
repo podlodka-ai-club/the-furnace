@@ -47,35 +47,15 @@ The system SHALL execute `PerTicketWorkflow` with three phase activities in stri
 - **AND** the spec phase MUST execute the real Claude-Agent-SDK-driven activity body, not a no-op
 - **AND** the coder and review phases MAY remain no-op stubs that log and return contract-shaped placeholders
 
-### Requirement: Workflow Records Attempts Row Around Spec Phase
-
-The workflow SHALL invoke a `recordAttempt` orchestrator-side activity around every spec phase execution so that one `attempts` row is persisted per invocation, regardless of whether the phase succeeded, requested clarification, or threw an internal error.
-
-#### Scenario: Spec phase succeeds
-
-- **WHEN** the spec phase returns a valid `SpecPhaseOutput`
-- **THEN** the workflow MUST record an `attempts` row with `outcome = 'passed'`, the workflow's run id, `phase = 'spec'`, and the current attempt index
-
-#### Scenario: Spec phase requests AC clarification
-
-- **WHEN** the spec phase throws an `AcClarificationRequested` non-retryable failure
-- **THEN** the workflow MUST record an `attempts` row with `outcome = 'stuck'`
-- **AND** the row MUST be written before the workflow transitions to its terminal state
-
-#### Scenario: Spec phase throws internal error
-
-- **WHEN** the spec phase throws any other failure (after Temporal retries are exhausted or for a non-retryable reason other than clarification)
-- **THEN** the workflow MUST record an `attempts` row with `outcome = 'failed'`
-
 ### Requirement: AC Clarification Failure Pauses Workflow Pending Human
 
-The workflow SHALL recognize `AcClarificationRequested` non-retryable failures from the spec phase as a structured human-pause signal, persist the run as `failed` with the structured failure detail describing the sub-ticket, and SHALL NOT advance to the coder phase.
+The workflow SHALL recognize `AcClarificationRequested` non-retryable failures from the spec phase as a structured human-pause signal, surface the sub-ticket detail in Temporal failure metadata, and SHALL NOT advance to the coder phase.
 
 #### Scenario: Clarification path detected
 
 - **WHEN** the spec phase throws an `AcClarificationRequested` failure carrying a sub-ticket reference
 - **THEN** the workflow MUST catch the failure and stop before invoking `runCoderPhase`
-- **AND** the workflow MUST update the persisted `workflow_runs` row with `status = 'failed'` and a structured failure detail that includes the sub-ticket `{ id, identifier, title }`
+- **AND** the workflow failure detail MUST include the sub-ticket `{ id, identifier, title }`
 - **AND** the corresponding Linear ticket MUST remain in its `In Progress` state (the workflow MUST NOT cancel it)
 
 #### Scenario: Other failures bubble normally
@@ -90,7 +70,7 @@ The system SHALL expose a `cancel` signal on `PerTicketWorkflow` that causes the
 #### Scenario: Cancel arrives during execution
 - **WHEN** `cancel` is signaled to a running `PerTicketWorkflow`
 - **THEN** the workflow MUST stop before starting any remaining phases
-- **AND** it MUST record cancellation in workflow state and persisted run status
+- **AND** it MUST record cancellation in workflow state so Temporal surfaces the cancelled terminal status
 
 ### Requirement: Per-Ticket Workflow Exposes Phase and Attempt Queries
 The system SHALL expose Temporal query handlers on `PerTicketWorkflow` for `currentPhase` and `attemptCount`.
@@ -98,11 +78,3 @@ The system SHALL expose Temporal query handlers on `PerTicketWorkflow` for `curr
 #### Scenario: Operator inspects workflow state
 - **WHEN** an operator queries `currentPhase` or `attemptCount` for a running or completed `PerTicketWorkflow`
 - **THEN** the workflow MUST return the latest in-memory state for phase position and retry attempt count
-
-### Requirement: Workflow Runs Are Persisted On Start and Phase Transitions
-The system SHALL write a `workflow_runs` record when `PerTicketWorkflow` starts and SHALL update that record on each phase transition.
-
-#### Scenario: Persistent status tracks lifecycle
-- **WHEN** a `PerTicketWorkflow` begins and advances from spec to coder to review
-- **THEN** persistence MUST contain a run row created at start
-- **AND** that row MUST be updated at each phase transition with the current phase/status metadata

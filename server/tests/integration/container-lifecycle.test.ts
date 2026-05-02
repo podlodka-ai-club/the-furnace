@@ -91,9 +91,6 @@ function buildOrchestratorActivities(
     helloActivity: async (n: string) => `hello, ${n}`,
     listAgentReadyTicketsActivity: async () => [],
     syncLinearTicketStateActivity: async () => {},
-    persistWorkflowRunStart: async () => {},
-    persistWorkflowRunTransition: async () => {},
-    recordAttempt: async () => {},
     validateRepoSlug: async ({ slug }) => {
       state.validateCalls.push(slug);
     },

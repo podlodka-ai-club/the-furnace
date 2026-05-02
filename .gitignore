@@ -9,9 +9,6 @@ coverage/
 .env.local
 .env.*.local
 
-data/pglite/*
-!data/pglite/.gitkeep
-
 data/logs/*
 !data/logs/.gitkeep
 

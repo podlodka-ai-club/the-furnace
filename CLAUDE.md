@@ -15,12 +15,12 @@ This project uses OpenSpec. Work is scoped as **changes** under `openspec/change
 - Runtime: Node.js + TypeScript (ES modules)
 - Orchestration: Temporal (added in `temporal-setup` change)
 - Agent framework: Claude Agent SDK (added in `spec-agent` / `coder-agent` changes)
-- Database: PGLite for dev/test, PostgreSQL for production. Never require a running Postgres for local dev.
+- Workflow run state lives in Temporal (no orchestrator database).
 
 ## Conventions
 
 - Strict TypeScript. No `any` unless justified in a comment.
-- Integration tests hit PGLite directly, not mocks.
+- Integration tests run against real Temporal, not mocks.
 - Commits reference the OpenSpec change they belong to.
 - Don't add dependencies outside of a change proposal that approves them.
 

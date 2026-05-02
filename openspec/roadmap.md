@@ -54,4 +54,6 @@
 
 - [ ] `server-unused` — Project was created from classic web-api templates, therefore have server runned by server/index.ts that is only launching migrations and hosts /health endpoint. We should probably get rid of it
 
+- [x] `pglite-drop` — Dropped DB layer entirely; workflow run state lives in Temporal (see `drop-orchestrator-db` change).
+
 > **Milestone:** Advanced governance complete — multi-persona review, split-vote escalation, and Slack-driven veto signaling.
