@@ -22,6 +22,7 @@ import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
+import { installWorkflowCleanupHook } from "./helpers/workflow-cleanup.js";
 
 const TEST_REPO_SLUG = "test-repo";
 const TEST_REGISTRY: ReadonlySet<string> = new Set([TEST_REPO_SLUG]);
@@ -174,6 +175,8 @@ function buildOrchestratorActivities(opts: {
 }
 
 describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end", () => {
+  installWorkflowCleanupHook();
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -185,7 +188,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
     const orchTaskQueue = `${TEMPORAL_TASK_QUEUE}-rr-happy-${randomUUID()}`;
     const stubbedDescription = "## Acceptance Criteria\n- ENG-RR1 must do the thing";
     const issueNode = makeIssueNode({
-      id: `issue-${randomUUID()}`,
+      id: `test-issue-${randomUUID()}`,
       identifier: "ENG-RR1",
       title: "Resolvable ticket",
       labelNames: ["agent-ready", `repo:${TEST_REPO_SLUG}`],
@@ -228,7 +231,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
         const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
           args: [],
           taskQueue: orchTaskQueue,
-          workflowId: `poller-${randomUUID()}`,
+          workflowId: `test-poller-${randomUUID()}`,
         });
 
         const result = await handle.result();
@@ -264,7 +267,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
 
     const orchTaskQueue = `${TEMPORAL_TASK_QUEUE}-rr-missing-${randomUUID()}`;
     const issueNode = makeIssueNode({
-      id: `issue-${randomUUID()}`,
+      id: `test-issue-${randomUUID()}`,
       identifier: "ENG-RR2",
       title: "Missing repo label",
       labelNames: ["agent-ready"],
@@ -297,7 +300,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
         const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
           args: [],
           taskQueue: orchTaskQueue,
-          workflowId: `poller-${randomUUID()}`,
+          workflowId: `test-poller-${randomUUID()}`,
         });
 
         await expect(handle.result()).resolves.toEqual({
@@ -325,7 +328,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
 
     const orchTaskQueue = `${TEMPORAL_TASK_QUEUE}-rr-ambig-${randomUUID()}`;
     const issueNode = makeIssueNode({
-      id: `issue-${randomUUID()}`,
+      id: `test-issue-${randomUUID()}`,
       identifier: "ENG-RR3",
       title: "Ambiguous repo labels",
       labelNames: ["agent-ready", `repo:${TEST_REPO_SLUG}`, "repo:other-repo"],
@@ -358,7 +361,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
         const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
           args: [],
           taskQueue: orchTaskQueue,
-          workflowId: `poller-${randomUUID()}`,
+          workflowId: `test-poller-${randomUUID()}`,
         });
 
         await expect(handle.result()).resolves.toEqual({
@@ -384,7 +387,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
 
     const orchTaskQueue = `${TEMPORAL_TASK_QUEUE}-rr-unknown-${randomUUID()}`;
     const issueNode = makeIssueNode({
-      id: `issue-${randomUUID()}`,
+      id: `test-issue-${randomUUID()}`,
       identifier: "ENG-RR4",
       title: "Unknown slug",
       labelNames: ["agent-ready", "repo:no-such-repo"],
@@ -417,7 +420,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
         const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
           args: [],
           taskQueue: orchTaskQueue,
-          workflowId: `poller-${randomUUID()}`,
+          workflowId: `test-poller-${randomUUID()}`,
         });
 
         await expect(handle.result()).resolves.toEqual({
@@ -444,13 +447,13 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
 
     const orchTaskQueue = `${TEMPORAL_TASK_QUEUE}-rr-mixed-${randomUUID()}`;
     const goodNode = makeIssueNode({
-      id: `issue-${randomUUID()}`,
+      id: `test-issue-${randomUUID()}`,
       identifier: "ENG-RR5",
       title: "Resolvable",
       labelNames: ["agent-ready", `repo:${TEST_REPO_SLUG}`],
     });
     const badNode = makeIssueNode({
-      id: `issue-${randomUUID()}`,
+      id: `test-issue-${randomUUID()}`,
       identifier: "ENG-RR6",
       title: "Ambiguous",
       labelNames: ["agent-ready", `repo:${TEST_REPO_SLUG}`, "repo:other"],
@@ -488,7 +491,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
           const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
             args: [],
             taskQueue: orchTaskQueue,
-            workflowId: `poller-${randomUUID()}`,
+            workflowId: `test-poller-${randomUUID()}`,
           });
 
           const result = await handle.result();

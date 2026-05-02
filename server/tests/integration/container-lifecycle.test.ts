@@ -21,6 +21,7 @@ import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
+import { installWorkflowCleanupHook } from "./helpers/workflow-cleanup.js";
 
 // Each test gets a unique slug (and therefore a unique per-repo task queue) so
 // that pending activity tasks left over from prior test runs in the shared
@@ -128,6 +129,8 @@ async function killAllChildren(state: OrchestratorState): Promise<void> {
 }
 
 describe("container-as-worker lifecycle", () => {
+  installWorkflowCleanupHook();
+
   beforeEach(() => {
     TEST_REPO_SLUG = `test-repo-${randomUUID()}`;
   });
@@ -163,7 +166,7 @@ describe("container-as-worker lifecycle", () => {
     const client = await createTemporalClient();
 
     await orchWorker.runUntil(async () => {
-      const ticketId = `issue-${randomUUID()}`;
+      const ticketId = `test-issue-${randomUUID()}`;
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
@@ -235,7 +238,7 @@ describe("container-as-worker lifecycle", () => {
     const client = await createTemporalClient();
 
     await orchWorker.runUntil(async () => {
-      const ticketId = `issue-${randomUUID()}`;
+      const ticketId = `test-issue-${randomUUID()}`;
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
@@ -296,7 +299,7 @@ describe("container-as-worker lifecycle", () => {
     const client = await createTemporalClient();
 
     await orchWorker.runUntil(async () => {
-      const ticketId = `issue-${randomUUID()}`;
+      const ticketId = `test-issue-${randomUUID()}`;
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
@@ -333,7 +336,7 @@ describe("container-as-worker lifecycle", () => {
     const client = await createTemporalClient();
 
     await orchWorker.runUntil(async () => {
-      const ticketId = `issue-${randomUUID()}`;
+      const ticketId = `test-issue-${randomUUID()}`;
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
