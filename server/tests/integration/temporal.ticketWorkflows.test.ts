@@ -30,6 +30,7 @@ import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
+import { installWorkflowCleanupHook } from "./helpers/workflow-cleanup.js";
 
 // Each test gets a unique slug (and therefore a unique per-repo task queue)
 // so that pending activity tasks left over from prior test runs in the shared
@@ -40,6 +41,8 @@ let TEST_REPO_SLUG: string;
 let TEST_REPO_QUEUE: string;
 
 describe("Temporal per-ticket workflow orchestration", () => {
+  installWorkflowCleanupHook();
+
   beforeEach(() => {
     TEST_REPO_SLUG = `test-repo-${randomUUID()}`;
     TEST_REPO_QUEUE = taskQueueForRepo(TEST_REPO_SLUG);
@@ -49,7 +52,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
   it("poller starts ticket workflows idempotently by ticket ID", async () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
-    const ticketId = `issue-${randomUUID()}`;
+    const ticketId = `test-issue-${randomUUID()}`;
     const activities: TemporalWorkerActivities = {
       ...buildBaseActivities(),
       listAgentReadyTicketsActivity: async () => [
@@ -72,7 +75,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
       const firstPoll = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
         args: [],
         taskQueue: TEMPORAL_TASK_QUEUE,
-        workflowId: `poller-${randomUUID()}`,
+        workflowId: `test-poller-${randomUUID()}`,
       });
 
       const firstPollResult = await firstPoll.result();
@@ -82,7 +85,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
       const secondPoll = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
         args: [],
         taskQueue: TEMPORAL_TASK_QUEUE,
-        workflowId: `poller-${randomUUID()}`,
+        workflowId: `test-poller-${randomUUID()}`,
       });
 
       const secondPollResult = await secondPoll.result();
@@ -94,7 +97,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
   it("keeps per-ticket workflow alive after poller completion", async () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
-    const ticketId = `issue-${randomUUID()}`;
+    const ticketId = `test-issue-${randomUUID()}`;
     const syncedStateNames: string[] = [];
     let releaseSpec: (() => void) | undefined;
     const specGate = new Promise<void>((resolve) => {
@@ -160,7 +163,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
           const pollerHandle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
             args: [],
             taskQueue: TEMPORAL_TASK_QUEUE,
-            workflowId: `poller-${randomUUID()}`,
+            workflowId: `test-poller-${randomUUID()}`,
           });
 
           await expect(pollerHandle.result()).resolves.toEqual({
@@ -264,7 +267,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           taskQueue: TEMPORAL_TASK_QUEUE,
-          workflowId: `ticket-test-${randomUUID()}`,
+          workflowId: `test-ticket-${randomUUID()}`,
         });
 
         await waitFor(async () => (await handle.query(currentPhaseQuery)) === "spec");
@@ -354,7 +357,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           taskQueue: TEMPORAL_TASK_QUEUE,
-          workflowId: `ticket-test-${randomUUID()}`,
+          workflowId: `test-ticket-${randomUUID()}`,
         });
 
         await assertStuckSubTicketRef(
@@ -435,7 +438,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           taskQueue: TEMPORAL_TASK_QUEUE,
-          workflowId: `ticket-test-${randomUUID()}`,
+          workflowId: `test-ticket-${randomUUID()}`,
         });
 
         await assertStuckSubTicketRef(
@@ -518,7 +521,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           taskQueue: TEMPORAL_TASK_QUEUE,
-          workflowId: `ticket-test-${randomUUID()}`,
+          workflowId: `test-ticket-${randomUUID()}`,
         });
         await expect(handle.result()).resolves.toEqual({
           status: "succeeded",
@@ -601,7 +604,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           taskQueue: TEMPORAL_TASK_QUEUE,
-          workflowId: `ticket-test-${randomUUID()}`,
+          workflowId: `test-ticket-${randomUUID()}`,
         });
 
         await expect(handle.result()).rejects.toBeInstanceOf(WorkflowFailedError);

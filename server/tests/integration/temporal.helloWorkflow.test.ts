@@ -8,8 +8,11 @@ import {
 import { createTemporalClient } from "../../src/temporal/client.js";
 import { createTemporalWorker } from "../../src/temporal/worker.js";
 import { HELLO_WORKFLOW_NAME } from "../../src/temporal/workflows/hello.js";
+import { installWorkflowCleanupHook } from "./helpers/workflow-cleanup.js";
 
 describe("Temporal hello smoke workflow", () => {
+  installWorkflowCleanupHook();
+
   it("uses a bounded worker activity concurrency", () => {
     expect(CLAUDE_ACTIVITY_CONCURRENCY).toBeGreaterThan(0);
     expect(CLAUDE_ACTIVITY_CONCURRENCY).toBeLessThanOrEqual(4);
@@ -21,7 +24,7 @@ describe("Temporal hello smoke workflow", () => {
     const worker = await createTemporalWorker();
     await worker.runUntil(async () => {
       const runId = randomUUID();
-      const workflowId = `hello-smoke-${runId}`;
+      const workflowId = `test-hello-smoke-${runId}`;
       const handle = await client.workflow.start(HELLO_WORKFLOW_NAME, {
         args: ["Temporal"],
         taskQueue: TEMPORAL_TASK_QUEUE,
