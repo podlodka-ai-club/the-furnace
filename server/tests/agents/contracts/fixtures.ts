@@ -42,6 +42,7 @@ export const validReviewerInput = {
     id: "ticket_1",
     identifier: "ENG-123",
     title: "Implement agent io contracts",
+    description: "Implement the agent IO contract layer.",
   },
   featureBranch: validCoderPhaseOutput.featureBranch,
   finalCommitSha: validCoderPhaseOutput.finalCommitSha,
@@ -96,6 +97,7 @@ export const invalidReviewerInput = {
     id: "",
     identifier: "",
     title: "",
+    description: "",
   },
 };
 

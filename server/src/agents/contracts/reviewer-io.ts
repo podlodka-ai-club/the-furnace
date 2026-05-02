@@ -5,6 +5,7 @@ export const reviewerTicketSchema = z.object({
   id: z.string().min(1),
   identifier: z.string().min(1),
   title: z.string().min(1),
+  description: z.string(),
 });
 
 export const reviewerInputSchema = z.object({

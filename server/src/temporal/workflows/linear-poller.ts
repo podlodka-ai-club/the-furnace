@@ -38,6 +38,7 @@ export async function linearPollerWorkflow(): Promise<LinearPollerWorkflowResult
               id: ticket.id,
               identifier: ticket.identifier,
               title: ticket.title,
+              description: ticket.description,
             },
             targetRepoSlug: ticket.targetRepoSlug,
           },

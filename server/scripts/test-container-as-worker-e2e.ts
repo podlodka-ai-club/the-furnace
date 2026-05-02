@@ -127,7 +127,7 @@ async function run(): Promise<void> {
     const handle = await client.start(PER_TICKET_WORKFLOW_NAME, {
       args: [
         {
-          ticket: { id: ticketId, identifier: "ENG-E2E", title: "container-as-worker e2e" },
+          ticket: { id: ticketId, identifier: "ENG-E2E", title: "container-as-worker e2e", description: "" },
           targetRepoSlug: options.repoSlug,
         } satisfies PerTicketWorkflowInput,
       ],

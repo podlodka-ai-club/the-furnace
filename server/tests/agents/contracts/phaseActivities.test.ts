@@ -32,6 +32,7 @@ describe("phase activities contract boundaries", () => {
         id: "ticket_1",
         identifier: "ENG-123",
         title: "Agent IO contracts",
+        description: "Agent IO contracts spec",
       },
     });
 
@@ -139,6 +140,7 @@ describe("phase activities contract boundaries", () => {
         id: "ticket_1",
         identifier: "ENG-123",
         title: "Agent IO contracts",
+        description: "Agent IO contracts spec",
       },
       featureBranch: "agent/spec-eng-123",
       finalCommitSha: "b".repeat(40),

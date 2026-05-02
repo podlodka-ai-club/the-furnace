@@ -10,6 +10,7 @@ export interface Ticket {
   id: string;
   identifier: string;
   title: string;
+  description: string;
   priority: number;
   labelIds: string[];
 }

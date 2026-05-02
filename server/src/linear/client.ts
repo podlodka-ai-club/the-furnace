@@ -43,6 +43,7 @@ const LIST_AGENT_READY_TICKETS_QUERY = `
         id
         identifier
         title
+        description
         priority
         labelIds
         labels {
@@ -98,6 +99,7 @@ interface ListAgentReadyTicketsResponse {
       id: string;
       identifier: string;
       title: string;
+      description?: string | null;
       priority?: number;
       labelIds?: string[];
       labels?: {
@@ -194,6 +196,7 @@ export function createLinearClient(options: CreateLinearClientOptions = {}): Lin
               id: node.id,
               identifier: node.identifier,
               title: node.title,
+              description: node.description ?? "",
               priority: node.priority ?? 0,
               labelIds: node.labelIds ?? [],
               targetRepoSlug: resolution.slug,

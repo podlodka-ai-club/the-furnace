@@ -52,6 +52,7 @@ describe("Linear client integration", () => {
                   id: "issue_1",
                   identifier: "ENG-1",
                   title: "Parent ticket",
+                  description: "## Acceptance Criteria\n- thing one\n- thing two",
                   priority: 2,
                   labelIds: ["lid_agent_ready", "lid_repo_demo"],
                   labels: {
@@ -80,6 +81,7 @@ describe("Linear client integration", () => {
                   id: "issue_2",
                   identifier: "ENG-2",
                   title: "Second ticket",
+                  description: null,
                   priority: 4,
                   labelIds: ["lid_agent_ready", "lid_repo_demo"],
                   labels: {
@@ -116,6 +118,7 @@ describe("Linear client integration", () => {
         id: "issue_1",
         identifier: "ENG-1",
         title: "Parent ticket",
+        description: "## Acceptance Criteria\n- thing one\n- thing two",
         priority: 2,
         labelIds: ["lid_agent_ready", "lid_repo_demo"],
         targetRepoSlug: "demo",
@@ -124,6 +127,7 @@ describe("Linear client integration", () => {
         id: "issue_2",
         identifier: "ENG-2",
         title: "Second ticket",
+        description: "",
         priority: 4,
         labelIds: ["lid_agent_ready", "lid_repo_demo"],
         targetRepoSlug: "demo",
@@ -146,6 +150,11 @@ describe("Linear client integration", () => {
     // The resolver depends on label `name`, so the GraphQL selection must request it.
     expect(capturedBodies[0]).toMatchObject({
       query: expect.stringMatching(/labels\s*\{\s*nodes\s*\{[\s\S]*\bname\b/),
+    });
+    // The description field must be selected so downstream code can route the
+    // human-authored ticket body through the workflow.
+    expect(capturedBodies[0]).toMatchObject({
+      query: expect.stringMatching(/nodes\s*\{[\s\S]*\bdescription\b[\s\S]*\bpriority\b/),
     });
     expect(capturedBodies[1]).toMatchObject({
       variables: { after: "cursor_1", teamId: "team_123" },

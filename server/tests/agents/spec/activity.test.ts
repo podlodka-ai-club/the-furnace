@@ -27,6 +27,7 @@ const TICKET: ReviewerTicket = {
   id: "issue_1",
   identifier: "ENG-42",
   title: "Implement feature X",
+  description: "User can do X.",
 };
 
 interface StubSessionOptions {

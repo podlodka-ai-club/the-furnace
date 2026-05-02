@@ -159,7 +159,7 @@ describe("container-as-worker lifecycle", () => {
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
-            ticket: { id: ticketId, identifier: "ENG-A", title: "Container lifecycle" },
+            ticket: { id: ticketId, identifier: "ENG-A", title: "Container lifecycle", description: "" },
             targetRepoSlug: TEST_REPO_SLUG,
           } satisfies PerTicketWorkflowInput,
         ],
@@ -227,7 +227,7 @@ describe("container-as-worker lifecycle", () => {
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
-            ticket: { id: ticketId, identifier: "ENG-B", title: "Cancelable phase" },
+            ticket: { id: ticketId, identifier: "ENG-B", title: "Cancelable phase", description: "" },
             targetRepoSlug: TEST_REPO_SLUG,
           } satisfies PerTicketWorkflowInput,
         ],
@@ -298,7 +298,7 @@ describe("container-as-worker lifecycle", () => {
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
-            ticket: { id: ticketId, identifier: "ENG-C", title: "Missing slug" },
+            ticket: { id: ticketId, identifier: "ENG-C", title: "Missing slug", description: "" },
             targetRepoSlug: "",
           } satisfies PerTicketWorkflowInput,
         ],
@@ -335,7 +335,7 @@ describe("container-as-worker lifecycle", () => {
       const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
         args: [
           {
-            ticket: { id: ticketId, identifier: "ENG-D", title: "Unknown slug" },
+            ticket: { id: ticketId, identifier: "ENG-D", title: "Unknown slug", description: "" },
             targetRepoSlug: "no-such-slug",
           } satisfies PerTicketWorkflowInput,
         ],

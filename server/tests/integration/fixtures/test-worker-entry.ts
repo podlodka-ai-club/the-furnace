@@ -17,7 +17,7 @@ import {
 import { runContainerWorker } from "../../../src/worker-entry.js";
 
 interface TestSpecInput {
-  ticket: { id: string; identifier: string; title: string };
+  ticket: { id: string; identifier: string; title: string; description: string };
 }
 
 async function slowSpecPhase(input: TestSpecInput): Promise<unknown> {

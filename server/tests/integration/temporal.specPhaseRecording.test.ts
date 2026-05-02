@@ -96,7 +96,7 @@ describe("Temporal spec phase recording", () => {
         const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
           args: [
             {
-              ticket: { id: ticketId, identifier: "ENG-100", title: "Clarification ticket" },
+              ticket: { id: ticketId, identifier: "ENG-100", title: "Clarification ticket", description: "" },
               targetRepoSlug: TEST_REPO_SLUG,
             },
           ],
@@ -185,7 +185,7 @@ describe("Temporal spec phase recording", () => {
         const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
           args: [
             {
-              ticket: { id: ticketId, identifier: "ENG-200", title: "Success ticket" },
+              ticket: { id: ticketId, identifier: "ENG-200", title: "Success ticket", description: "" },
               targetRepoSlug: TEST_REPO_SLUG,
             },
           ],
@@ -258,7 +258,7 @@ describe("Temporal spec phase recording", () => {
         const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
           args: [
             {
-              ticket: { id: ticketId, identifier: "ENG-300", title: "Generic failure ticket" },
+              ticket: { id: ticketId, identifier: "ENG-300", title: "Generic failure ticket", description: "" },
               targetRepoSlug: TEST_REPO_SLUG,
             },
           ],

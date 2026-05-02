@@ -9,6 +9,7 @@ export interface PersistWorkflowRunStartInput {
     id: string;
     identifier: string;
     title: string;
+    description: string;
   };
 }
 
@@ -23,8 +24,8 @@ export async function persistWorkflowRunStart(input: PersistWorkflowRunStartInpu
   const db = await getDatabase();
   await db.transaction(async (tx) => {
     await tx.query(
-      "INSERT INTO tickets(external_id, title, ac_text, label, state) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (external_id) DO UPDATE SET title = EXCLUDED.title",
-      [input.ticket.id, input.ticket.title, "pending acceptance criteria", "agent-ready", "in-progress"],
+      "INSERT INTO tickets(external_id, title, ac_text, label, state) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (external_id) DO UPDATE SET title = EXCLUDED.title, ac_text = EXCLUDED.ac_text",
+      [input.ticket.id, input.ticket.title, input.ticket.description, "agent-ready", "in-progress"],
     );
 
     await tx.query(
@@ -57,4 +58,12 @@ async function getDatabase(): Promise<Database> {
   }
 
   return dbPromise;
+}
+
+export function _resetWorkflowRunsDb(): void {
+  dbPromise = undefined;
+}
+
+export async function _getWorkflowRunsDb(): Promise<Database> {
+  return getDatabase();
 }
