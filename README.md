@@ -152,3 +152,7 @@ the-furnace/
 - [`openspec/roadmap.md`](openspec/roadmap.md) — implementation order
 - [`CLAUDE.md`](CLAUDE.md) — how to work in this repo with Claude
 - [`TESTING.md`](TESTING.md) — test tiers and commands
+
+## Linear → workflow path
+
+Tickets must carry both an `agent-ready` label and exactly one `repo:<slug>` label whose `<slug>` matches an entry in `build/repos.json`. The Linear client (`server/src/linear/client.ts`) resolves the slug at the polling boundary and returns `ResolvedTicket[]`; tickets without a valid repo label are logged (`event: "linear.ticket_skipped"`) and skipped before any workflow starts.

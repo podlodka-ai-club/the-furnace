@@ -1,6 +1,12 @@
-# AGENTS.md
+Autonomous coding agent system orchestrated via Temporal workflows. Linear ticket → failing tests (spec agent) → green tests (coder agent) → multi-persona review → auto-merge.
 
-Instructions for AI coding agents working in this repo.
+## Spec-driven workflow
+
+This project uses OpenSpec. Work is scoped as **changes** under `openspec/changes/<name>/`. Before implementing a change, read its `proposal.md`. New work starts with a proposal, then gets specs/tasks through the opsx workflow (`/opsx:new`, `/opsx:ff`, `/opsx:apply`).
+
+- Roadmap: `openspec/roadmap.md`
+- Concept: `openspec/concept.md`
+- Active changes: `openspec status`
 
 ## Before making changes
 
@@ -11,10 +17,13 @@ Instructions for AI coding agents working in this repo.
 ## Implementation rules
 
 - Follow the proposal's `What Changes` and `Capabilities` sections — do not expand scope.
-- Run `npm test` from the repo root before declaring work complete.
+- Run tests how described in `TESTING.md` from the repo root before declaring work complete.
 - Integration tests must run against real Temporal (workflow run state lives there), not mocks.
 - Never modify `openspec/concept.md`; amend `proposal.md` if scope shifts.
 
-## Provenance
+## Conventions
 
-Commits should reference the change name in the message (e.g. `feat(spec-agent): ...`). Commit trailers with workflow metadata are added by the `provenance-store` change once implemented.
+- Strict TypeScript. No `any` unless justified in a comment.
+- Integration tests run against real Temporal, not mocks.
+- Commits reference the OpenSpec change they belong to.
+- Don't add dependencies outside of a change proposal that approves them.
