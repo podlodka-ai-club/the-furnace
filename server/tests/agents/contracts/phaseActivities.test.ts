@@ -20,9 +20,14 @@ import type {
   SpecAgentSession,
 } from "../../../src/agents/spec/agent.js";
 import type {
+  CoderAgentClient,
+  CoderAgentDecision,
+  CoderAgentSession,
+} from "../../../src/agents/coder/agent.js";
+import type {
   RunCommand,
   RunCommandResult,
-} from "../../../src/agents/spec/repo-ops.js";
+} from "../../../src/agents/shared/repo-ops.js";
 import type { LinearClientApi } from "../../../src/linear/types.js";
 
 describe("phase activities contract boundaries", () => {
@@ -129,8 +134,99 @@ describe("phase activities contract boundaries", () => {
       ],
     });
 
-    const output = await runCoderPhase(specOutput);
-    expect(coderPhaseOutputSchema.parse(output)).toEqual(output);
+    const repoPath = await mkdtemp(path.join(os.tmpdir(), "furnace-coder-contract-"));
+    try {
+      const decisions: CoderAgentDecision[] = [
+        { type: "submit_implementation", input: { summary: "made it green" } },
+      ];
+      let cursor = 0;
+      const session: CoderAgentSession = {
+        next: async () => decisions[cursor++],
+        close: async () => {},
+      };
+      const agentClient: CoderAgentClient = {
+        startSession: async () => session,
+      };
+
+      const ok = (stdout = ""): RunCommandResult => ({ exitCode: 0, stdout, stderr: "" });
+      const steps: Array<(c: string, a: string[]) => RunCommandResult | null> = [
+        // checkoutFeatureBranch: git fetch
+        (c, a) => (c === "git" && a[0] === "fetch" ? ok() : null),
+        // checkoutFeatureBranch: git checkout -B
+        (c, a) => (c === "git" && a[0] === "checkout" ? ok() : null),
+        // checkoutFeatureBranch: git status --porcelain (clean)
+        (c, a) => (c === "git" && a[0] === "status" ? ok("") : null),
+        // getHeadSha
+        (c, a) => (c === "git" && a[0] === "rev-parse" ? ok(`${"a".repeat(40)}\n`) : null),
+        // diffPathsTouched: git diff --name-only (no test paths touched)
+        (c, a) => (c === "git" && a[0] === "diff" && a[1] === "--name-only" ? ok("") : null),
+        // npm test (passing)
+        (c, a) =>
+          c === "npm" && a[0] === "test"
+            ? ok("Tests  3 passed (3)\n")
+            : null,
+        // commitAll: git add --all
+        (c, a) => (c === "git" && a[0] === "add" ? ok() : null),
+        // commitAll: git commit
+        (c, a) => (c === "git" && a[0] === "commit" ? ok() : null),
+        // commitAll: git rev-parse HEAD
+        (c, a) => (c === "git" && a[0] === "rev-parse" ? ok(`${"b".repeat(40)}\n`) : null),
+        // pushExistingBranch: git push
+        (c, a) => (c === "git" && a[0] === "push" ? ok() : null),
+        // readDiffStat: git diff --shortstat
+        (c, a) =>
+          c === "git" && a[0] === "diff" && a[1] === "--shortstat"
+            ? ok(" 2 files changed, 10 insertions(+), 1 deletion(-)\n")
+            : null,
+      ];
+      let stepIdx = 0;
+      const run: RunCommand = async (command, args) => {
+        while (stepIdx < steps.length) {
+          const result = steps[stepIdx](command, args);
+          stepIdx += 1;
+          if (result) return result;
+        }
+        throw new Error(`unexpected runCommand: ${command} ${args.join(" ")}`);
+      };
+
+      const linearClient: LinearClientApi = {
+        listAgentReadyTickets: async () => [],
+        createSubTicket: async () => {
+          throw new Error("should not be called");
+        },
+        postComment: async () => ({ id: "x" }),
+        updateIssueState: async () => {},
+      };
+
+      const output = await runCoderPhase(
+        {
+          ticket: {
+            id: "ticket_1",
+            identifier: "ENG-123",
+            title: "Agent IO contracts",
+            description: "Agent IO contracts spec",
+          },
+          specOutput,
+        },
+        {
+          agentClient,
+          runCommand: run,
+          linearClient,
+          loadPrompt: async () => "system prompt",
+          resolveRepoPath: () => repoPath,
+          resolveWorkflowMeta: () => ({
+            workflowId: "ticket-test",
+            namespace: "default",
+            attempt: 1,
+          }),
+          resolveWebBase: () => "http://localhost:8233",
+          resolveCorrectionBudget: () => 3,
+        },
+      );
+      expect(coderPhaseOutputSchema.parse(output)).toEqual(output);
+    } finally {
+      await rm(repoPath, { recursive: true, force: true });
+    }
   });
 
   it("returns review result that passes schema validation", async () => {

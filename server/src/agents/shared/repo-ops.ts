@@ -2,10 +2,9 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-// Repository operations the spec activity performs after a successful
-// `propose_failing_tests` decision: write files, run tests, verify failure,
-// branch, commit-per-file, push. Each is exposed as a small async function so
-// unit tests can stub them via dependency injection in `activity.ts`.
+// Repository operations the spec and coder activities perform inside the
+// per-attempt container. Each is exposed as a small async function so unit
+// tests can stub them via dependency injection in the activities.
 
 export interface RunCommandOptions {
   cwd: string;
@@ -173,6 +172,71 @@ export async function createFeatureBranch(
   }
 }
 
+// Fetch and check out a branch produced by an upstream phase. Asserts the
+// working tree is clean afterwards so the agent starts from a known state.
+export async function checkoutFeatureBranch(
+  ctx: GitOpsContext,
+  branch: string,
+): Promise<void> {
+  const fetch = await ctx.run("git", ["fetch", "origin", branch], { cwd: ctx.repoRoot });
+  if (fetch.exitCode !== 0) {
+    throw new Error(
+      `git fetch origin ${branch} failed: ${fetch.stderr.trim() || fetch.stdout.trim()}`,
+    );
+  }
+  const checkout = await ctx.run("git", ["checkout", "-B", branch, `origin/${branch}`], {
+    cwd: ctx.repoRoot,
+  });
+  if (checkout.exitCode !== 0) {
+    throw new Error(
+      `git checkout -B ${branch} origin/${branch} failed: ${checkout.stderr.trim() || checkout.stdout.trim()}`,
+    );
+  }
+  const status = await ctx.run("git", ["status", "--porcelain"], { cwd: ctx.repoRoot });
+  if (status.exitCode !== 0) {
+    throw new Error(
+      `git status --porcelain failed: ${status.stderr.trim() || status.stdout.trim()}`,
+    );
+  }
+  if (status.stdout.trim().length > 0) {
+    throw new Error(
+      `working tree not clean after checkout of ${branch}: ${status.stdout.trim()}`,
+    );
+  }
+}
+
+// Returns the subset of `paths` modified between `basisRef` and HEAD (after
+// staging the agent's working-tree changes). Used by the coder activity to
+// reject submissions that modified spec test files.
+export async function diffPathsTouched(
+  ctx: GitOpsContext,
+  basisRef: string,
+  paths: ReadonlyArray<string>,
+): Promise<string[]> {
+  if (paths.length === 0) {
+    return [];
+  }
+  const args = ["diff", "--name-only", basisRef, "--", ...paths];
+  const result = await ctx.run("git", args, { cwd: ctx.repoRoot });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git diff --name-only ${basisRef} failed: ${result.stderr.trim() || result.stdout.trim()}`,
+    );
+  }
+  const wanted = new Set(paths);
+  const touched: string[] = [];
+  for (const line of result.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    if (wanted.has(trimmed)) {
+      touched.push(trimmed);
+    }
+  }
+  return touched;
+}
+
 export interface CommitTrailerInput {
   workflowId: string;
   ticketId: string;
@@ -211,6 +275,48 @@ export async function commitFile(
   return sha.stdout.trim();
 }
 
+export interface CommitAllInput {
+  subject: string;
+  trailer: CommitTrailerInput;
+  phase: string;
+}
+
+export function buildCommitMessageWithSubject(
+  subject: string,
+  trailer: CommitTrailerInput,
+  phase: string,
+): string {
+  const trailers = [
+    `Workflow-Id: ${trailer.workflowId}`,
+    `Ticket-Id: ${trailer.ticketId}`,
+    `Attempt: ${trailer.attempt}`,
+    `Phase: ${phase}`,
+  ].join("\n");
+  return `${subject}\n\n${trailers}\n`;
+}
+
+// Stage all working-tree changes and create a single commit with the structured
+// trailer. Used by the coder activity to capture the agent's diff as one commit.
+export async function commitAll(
+  ctx: GitOpsContext,
+  input: CommitAllInput,
+): Promise<string> {
+  const add = await ctx.run("git", ["add", "--all"], { cwd: ctx.repoRoot });
+  if (add.exitCode !== 0) {
+    throw new Error(`git add --all failed: ${add.stderr.trim() || add.stdout.trim()}`);
+  }
+  const message = buildCommitMessageWithSubject(input.subject, input.trailer, input.phase);
+  const commit = await ctx.run("git", ["commit", "-m", message], { cwd: ctx.repoRoot });
+  if (commit.exitCode !== 0) {
+    throw new Error(`git commit failed: ${commit.stderr.trim() || commit.stdout.trim()}`);
+  }
+  const sha = await ctx.run("git", ["rev-parse", "HEAD"], { cwd: ctx.repoRoot });
+  if (sha.exitCode !== 0 || sha.stdout.trim().length === 0) {
+    throw new Error(`git rev-parse HEAD failed: ${sha.stderr.trim() || sha.stdout.trim()}`);
+  }
+  return sha.stdout.trim();
+}
+
 export async function pushBranch(ctx: GitOpsContext, branch: string): Promise<void> {
   const push = await ctx.run("git", ["push", "--set-upstream", "origin", branch], {
     cwd: ctx.repoRoot,
@@ -218,6 +324,20 @@ export async function pushBranch(ctx: GitOpsContext, branch: string): Promise<vo
   if (push.exitCode !== 0) {
     throw new Error(
       `git push --set-upstream origin ${branch} failed: ${push.stderr.trim() || push.stdout.trim()}`,
+    );
+  }
+}
+
+// Push a branch that already tracks `origin` (no `--set-upstream`). Used by
+// the coder activity to push the existing spec feature branch with a new commit.
+export async function pushExistingBranch(
+  ctx: GitOpsContext,
+  branch: string,
+): Promise<void> {
+  const push = await ctx.run("git", ["push", "origin", branch], { cwd: ctx.repoRoot });
+  if (push.exitCode !== 0) {
+    throw new Error(
+      `git push origin ${branch} failed: ${push.stderr.trim() || push.stdout.trim()}`,
     );
   }
 }

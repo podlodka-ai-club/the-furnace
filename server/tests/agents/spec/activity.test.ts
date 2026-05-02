@@ -18,7 +18,7 @@ import type {
 import type {
   RunCommand,
   RunCommandResult,
-} from "../../../src/agents/spec/repo-ops.js";
+} from "../../../src/agents/shared/repo-ops.js";
 import type { LinearClientApi, CreatedSubTicket } from "../../../src/linear/types.js";
 import type { ReviewerTicket } from "../../../src/agents/contracts/index.js";
 

@@ -10,3 +10,33 @@ export const TEMPORAL_WEB_BASE = process.env.TEMPORAL_WEB_BASE ?? "http://localh
 // Keep this conservative: a single Claude subscription is shared by all activities.
 // Bounding local activity concurrency prevents one worker from self-starving the quota.
 export const CLAUDE_ACTIVITY_CONCURRENCY = Number(process.env.CLAUDE_ACTIVITY_CONCURRENCY ?? 2);
+
+// Default mount point inside per-attempt containers where the freshly cloned repo
+// lives. Activities resolve their working directory through `readWorkerRepoPath`
+// so test paths can override it via env without touching the container.
+export const WORKER_REPO_PATH_DEFAULT = "/workspace";
+
+export function readWorkerRepoPath(): string {
+  const raw = process.env.WORKER_REPO_PATH;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return raw;
+  }
+  return WORKER_REPO_PATH_DEFAULT;
+}
+
+// Maximum corrective nudges the coder activity will send to the agent before
+// giving up the attempt with a retryable failure. Default 3; override via env
+// for tighter or looser budgets.
+export function readCoderCorrectionBudget(): number {
+  const raw = process.env.CODER_CORRECTION_BUDGET;
+  if (raw === undefined || raw.trim().length === 0) {
+    return 3;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(
+      `CODER_CORRECTION_BUDGET must be a positive integer, got: ${JSON.stringify(raw)}`,
+    );
+  }
+  return parsed;
+}

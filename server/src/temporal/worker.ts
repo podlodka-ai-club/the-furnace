@@ -11,7 +11,7 @@ import * as helloActivities from "./activities/hello.js";
 import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
 import * as workerLauncherActivities from "./activities/worker-launcher.js";
-import type { SpecPhaseInput } from "./activities/phases.js";
+import type { CoderPhaseInput, SpecPhaseInput } from "./activities/phases.js";
 import type { SyncLinearTicketStateInput } from "./activities/linear.js";
 import type {
   LaunchWorkerContainerInput,
@@ -36,7 +36,7 @@ export interface TemporalWorkerActivities {
   // per-repo task queue (`repo-${slug}-worker`). They remain part of this type
   // so tests can opt into orchestrator-side execution via `injectPhaseActivities`.
   runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput>;
-  runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput>;
+  runCoderPhase(input: CoderPhaseInput): Promise<CoderPhaseOutput>;
   runReviewPhase(input: ReviewerInput): Promise<ReviewResult>;
   launchWorkerContainer(input: LaunchWorkerContainerInput): Promise<LaunchWorkerContainerResult>;
   validateRepoSlug(input: { slug: string }): Promise<void>;

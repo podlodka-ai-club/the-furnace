@@ -25,8 +25,8 @@ import {
   type GitOpsContext,
   type ProposedFile,
   type RunCommand,
-} from "./repo-ops.js";
-import { writeProposedFile } from "./repo-ops.js";
+} from "../shared/repo-ops.js";
+import { writeProposedFile } from "../shared/repo-ops.js";
 import {
   defaultSpecAgentClient,
 } from "./sdk-client.js";

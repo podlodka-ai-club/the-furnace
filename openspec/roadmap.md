@@ -32,7 +32,7 @@
 ## Phase 4: Agent pipeline (MVP)
 
 - [x] `spec-agent` — Linear ticket → failing tests inside the container; opens a typed `ac-clarification` sub-ticket when AC is ambiguous
-- [ ] `coder-agent` — Claude Agent SDK loop targeting green tests; files typed `dep-missing` / `design-question` sub-tickets when stuck
+- [x] `coder-agent` — Claude Agent SDK loop targeting green tests; files typed `dep-missing` / `design-question` sub-tickets when stuck
 - [ ] `review-agent` — Single reviewer activity with one verdict and reasoning payload over the coder diff
 - [ ] `github-adapter` — Open PR after review passes; attach structured workflow trailers for traceability
 

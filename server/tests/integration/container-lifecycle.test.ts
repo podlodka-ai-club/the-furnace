@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTemporalClient } from "../../src/temporal/client.js";
 import {
   createTemporalWorker,
@@ -22,8 +22,10 @@ import type {
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
 
-const TEST_REPO_SLUG = "test-repo";
-const TEST_REPO_QUEUE = taskQueueForRepo(TEST_REPO_SLUG);
+// Each test gets a unique slug (and therefore a unique per-repo task queue) so
+// that pending activity tasks left over from prior test runs in the shared
+// Temporal namespace cannot be claimed by a later test's worker.
+let TEST_REPO_SLUG: string;
 
 const TESTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.resolve(TESTS_DIR, "..", "..");
@@ -122,6 +124,10 @@ async function killAllChildren(state: OrchestratorState): Promise<void> {
 }
 
 describe("container-as-worker lifecycle", () => {
+  beforeEach(() => {
+    TEST_REPO_SLUG = `test-repo-${randomUUID()}`;
+  });
+
   const sharedState: OrchestratorState = {
     launchCalls: [],
     validateCalls: [],
@@ -191,11 +197,12 @@ describe("container-as-worker lifecycle", () => {
   it("8.4: SIGTERM during in-flight activity → CancelledFailure → fresh container completes the retry", async () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
-    // Temporal-level activity retries don't re-execute the workflow code, so
-    // launchWorkerContainer is only called once per phase. To exercise "child
-    // dies → fresh worker picks up retry" without a workflow-level retry loop,
-    // the first spec launch spawns a blocking test fixture; after SIGTERM the
-    // test directly spawns a recovery worker on the per-repo queue.
+    // The workflow's runPhase loop launches a fresh container for every phase
+    // attempt (see workflows/per-ticket.ts). When the first spec container is
+    // SIGTERM'd mid-activity, the activity surfaces a failure to the workflow,
+    // runPhase catches it, increments the attempt counter, and calls
+    // launchWorkerContainer again — producing a fresh worker on the per-repo
+    // queue that completes the retry. This test exercises that path end-to-end.
     let firstSpecSpawned = false;
     const launchBehavior = (input: LaunchWorkerContainerInput): SpawnedChild => {
       if (input.phase === "spec" && !firstSpecSpawned) {
@@ -249,31 +256,18 @@ describe("container-as-worker lifecycle", () => {
       // singleTaskActivity wrapper records failure → process exits non-zero.
       expect(blockingExit.signal === null || blockingExit.signal === "SIGTERM").toBe(true);
 
-      // Spawn a fresh worker on the per-repo queue to claim the retry. In
-      // production this happens because the orchestrator's retry loop would
-      // call launchWorkerContainer again; here we emulate that out-of-band.
-      const recovery = spawnChildWorker(
-        {
-          ticketId,
-          phase: "spec",
-          attemptId: `${buildPerTicketWorkflowId(ticketId)}:spec:recovery`,
-          repoSlug: TEST_REPO_SLUG,
-        },
-        TEST_WORKER_ENTRY,
-      );
-      sharedState.spawned.push(recovery);
-
       await expect(handle.result()).resolves.toEqual({ status: "succeeded" });
     });
 
     await Promise.all(sharedState.spawned.map((s) => s.exit));
 
     const phases = sharedState.launchCalls.map((c) => c.phase);
-    expect(phases).toContain("spec");
+    // Spec must appear at least twice: the killed first attempt, and a retry
+    // launched by runPhase. Coder and review follow on subsequent launches.
+    expect(phases.filter((p) => p === "spec").length).toBeGreaterThanOrEqual(2);
     expect(phases).toContain("coder");
     expect(phases).toContain("review");
 
-    // Three workflow-driven launches plus one manual recovery worker.
     expect(sharedState.spawned.length).toBeGreaterThanOrEqual(4);
     const blockingResult = await sharedState.spawned[0].exit;
     expect(blockingResult.signal === null || blockingResult.signal === "SIGTERM").toBe(true);
@@ -348,8 +342,6 @@ describe("container-as-worker lifecycle", () => {
     expect(sharedState.launchCalls).toHaveLength(0);
   }, 30_000);
 });
-
-void TEST_REPO_QUEUE; // queue name asserted indirectly via launchCalls[].repoSlug
 
 async function assertTemporalPortReachable(): Promise<void> {
   await new Promise<void>((resolve, reject) => {

@@ -12,7 +12,7 @@ import { TEMPORAL_TASK_QUEUE } from "../../src/temporal/config.js";
 import { taskQueueForRepo } from "../../src/temporal/repo-slug.js";
 import { LINEAR_POLLER_WORKFLOW_NAME } from "../../src/temporal/workflows/linear-poller.js";
 import { buildPerTicketWorkflowId } from "../../src/temporal/workflows/per-ticket.js";
-import type { SpecPhaseInput } from "../../src/temporal/activities/phases.js";
+import type { CoderPhaseInput, SpecPhaseInput } from "../../src/temporal/activities/phases.js";
 import type {
   CoderPhaseOutput,
   ReviewerInput,
@@ -114,7 +114,7 @@ function buildListActivity(): TemporalWorkerActivities["listAgentReadyTicketsAct
 
 function defaultPhaseActivities(): {
   runSpecPhase: (input: SpecPhaseInput) => Promise<SpecPhaseOutput>;
-  runCoderPhase: (input: SpecPhaseOutput) => Promise<CoderPhaseOutput>;
+  runCoderPhase: (input: CoderPhaseInput) => Promise<CoderPhaseOutput>;
   runReviewPhase: (input: ReviewerInput) => Promise<{
     verdict: "approve";
     reasoning: string;
@@ -132,8 +132,8 @@ function defaultPhaseActivities(): {
         },
       ],
     }),
-    runCoderPhase: async (input: SpecPhaseOutput): Promise<CoderPhaseOutput> => ({
-      featureBranch: input.featureBranch,
+    runCoderPhase: async (input: CoderPhaseInput): Promise<CoderPhaseOutput> => ({
+      featureBranch: input.specOutput.featureBranch,
       finalCommitSha: "c".repeat(40),
       diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
       testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
