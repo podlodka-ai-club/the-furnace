@@ -93,6 +93,10 @@ function buildOrchestratorActivities(
     helloActivity: async (n: string) => `hello, ${n}`,
     listAgentReadyTicketsActivity: async () => [],
     syncLinearTicketStateActivity: async () => {},
+    openPullRequestActivity: async () => ({
+      number: 1,
+      url: "https://github.test/example/pr/1",
+    }),
     validateRepoSlug: async ({ slug }) => {
       state.validateCalls.push(slug);
     },
@@ -171,7 +175,10 @@ describe("container-as-worker lifecycle", () => {
         workflowId: buildPerTicketWorkflowId(ticketId),
       });
 
-      await expect(handle.result()).resolves.toEqual({ status: "succeeded" });
+      await expect(handle.result()).resolves.toEqual({
+        status: "succeeded",
+        pr: { number: 1, url: "https://github.test/example/pr/1" },
+      });
     });
 
     await Promise.all(sharedState.spawned.map((s) => s.exit));
@@ -256,7 +263,10 @@ describe("container-as-worker lifecycle", () => {
       // singleTaskActivity wrapper records failure → process exits non-zero.
       expect(blockingExit.signal === null || blockingExit.signal === "SIGTERM").toBe(true);
 
-      await expect(handle.result()).resolves.toEqual({ status: "succeeded" });
+      await expect(handle.result()).resolves.toEqual({
+        status: "succeeded",
+        pr: { number: 1, url: "https://github.test/example/pr/1" },
+      });
     });
 
     await Promise.all(sharedState.spawned.map((s) => s.exit));

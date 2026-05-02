@@ -7,12 +7,17 @@ import type {
   SpecPhaseOutput,
 } from "../agents/contracts/index.js";
 import type { ResolvedTicket } from "../linear/types.js";
+import { openPullRequestActivity } from "./activities/github.js";
 import * as helloActivities from "./activities/hello.js";
 import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
 import * as workerLauncherActivities from "./activities/worker-launcher.js";
 import type { CoderPhaseInput, SpecPhaseInput } from "./activities/phases.js";
 import type { SyncLinearTicketStateInput } from "./activities/linear.js";
+import type {
+  OpenPullRequestInput,
+  OpenPullRequestResult,
+} from "./activities/github.js";
 import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
@@ -40,12 +45,14 @@ export interface TemporalWorkerActivities {
   runReviewPhase(input: ReviewerInput): Promise<ReviewResult>;
   launchWorkerContainer(input: LaunchWorkerContainerInput): Promise<LaunchWorkerContainerResult>;
   validateRepoSlug(input: { slug: string }): Promise<void>;
+  openPullRequestActivity(input: OpenPullRequestInput): Promise<OpenPullRequestResult>;
 }
 
 const orchestratorOnlyActivities = {
   ...helloActivities,
   ...linearActivities,
   ...workerLauncherActivities,
+  openPullRequestActivity,
 };
 
 const defaultActivities: TemporalWorkerActivities = {

@@ -171,7 +171,10 @@ describe("Temporal per-ticket workflow orchestration", () => {
           await waitFor(async () => (await ticketHandle.query(currentPhaseQuery)) === "spec");
 
           releaseSpec?.();
-          await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+          await expect(ticketHandle.result()).resolves.toEqual({
+            status: "succeeded",
+            pr: { number: 1, url: "https://github.test/example/pr/1" },
+          });
         });
       }),
     ]);
@@ -184,6 +187,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
 
     const phaseCalls: string[] = [];
     const syncedStateNames: string[] = [];
+    let prOpenCalls = 0;
     let releaseSpec: (() => void) | undefined;
     const specGate = new Promise<void>((resolve) => {
       releaseSpec = resolve;
@@ -230,6 +234,10 @@ describe("Temporal per-ticket workflow orchestration", () => {
       syncLinearTicketStateActivity: async (input) => {
         syncedStateNames.push(input.stateName);
       },
+      openPullRequestActivity: async () => {
+        prOpenCalls += 1;
+        return { number: 1, url: "https://github.test/example/pr/1" };
+      },
     };
 
     const client = await createTemporalClient();
@@ -271,13 +279,15 @@ describe("Temporal per-ticket workflow orchestration", () => {
 
     expect(phaseCalls).toEqual(["spec"]);
     expect(syncedStateNames).toEqual(["In Progress", "Canceled"]);
+    expect(prOpenCalls).toBe(0);
   }, 30_000);
 
-  it("DepMissingRequested from coder phase: review NOT invoked, ticket stays In Progress", async () => {
+  it("DepMissingRequested from coder phase: review NOT invoked, ticket stays In Progress, no PR opened", async () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
     const phaseCalls: string[] = [];
     const syncedStateNames: string[] = [];
+    let prOpenCalls = 0;
     const subTicketRef = { id: "issue_dep", identifier: "ENG-DEP-1", title: "dep-missing for ENG-3" };
 
     const phaseActivities = {
@@ -313,6 +323,10 @@ describe("Temporal per-ticket workflow orchestration", () => {
       ...phaseActivities,
       syncLinearTicketStateActivity: async (input) => {
         syncedStateNames.push(input.stateName);
+      },
+      openPullRequestActivity: async () => {
+        prOpenCalls += 1;
+        return { number: 1, url: "https://github.test/example/pr/1" };
       },
     };
 
@@ -351,6 +365,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
 
     expect(phaseCalls).toEqual(["spec", "coder"]);
     expect(syncedStateNames).toEqual(["In Progress"]);
+    expect(prOpenCalls).toBe(0);
   }, 30_000);
 
   it("DesignQuestionRequested from coder phase: review NOT invoked, ticket stays In Progress", async () => {
@@ -433,11 +448,12 @@ describe("Temporal per-ticket workflow orchestration", () => {
     expect(syncedStateNames).toEqual(["In Progress"]);
   }, 30_000);
 
-  it("happy coder result: review phase invoked with coder output", async () => {
+  it("happy coder result: review phase invoked with coder output and PR opened with workflow metadata", async () => {
     await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
 
     const phaseCalls: string[] = [];
     const seenReviewerInputs: ReviewerInput[] = [];
+    const seenPrInputs: Array<Record<string, unknown>> = [];
 
     const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
@@ -472,6 +488,10 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const activities: TemporalWorkerActivities = {
       ...buildBaseActivities(),
       ...phaseActivities,
+      openPullRequestActivity: async (input) => {
+        seenPrInputs.push(input as unknown as Record<string, unknown>);
+        return { number: 1, url: "https://github.test/example/pr/1" };
+      },
     };
 
     const client = await createTemporalClient();
@@ -498,7 +518,10 @@ describe("Temporal per-ticket workflow orchestration", () => {
           taskQueue: TEMPORAL_TASK_QUEUE,
           workflowId: `ticket-test-${randomUUID()}`,
         });
-        await expect(handle.result()).resolves.toEqual({ status: "succeeded" });
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
       });
     });
 
@@ -507,6 +530,14 @@ describe("Temporal per-ticket workflow orchestration", () => {
     expect(seenReviewerInputs[0].finalCommitSha).toBe("f".repeat(40));
     expect(seenReviewerInputs[0].diffStat).toEqual({ filesChanged: 2, insertions: 7, deletions: 1 });
     expect(seenReviewerInputs[0].testRunSummary.passed).toBe(4);
+    expect(seenPrInputs).toHaveLength(1);
+    expect(seenPrInputs[0]).toMatchObject({
+      featureBranch: expect.stringContaining("agent/spec-eng-5"),
+      targetRepoSlug: TEST_REPO_SLUG,
+      finalCommitSha: "f".repeat(40),
+      diffSummary: "2 files changed, +7/-1",
+      attemptCount: expect.any(Number),
+    });
   }, 30_000);
 
   it("generic non-stuck failure surfaces via normal Temporal failure semantics", async () => {
@@ -614,6 +645,10 @@ function buildBaseActivities(): TemporalWorkerActivities {
       logsPath: `/tmp/test-logs/${input.attemptId}`,
     }),
     validateRepoSlug: async (_input: { slug: string }): Promise<void> => {},
+    openPullRequestActivity: async () => ({
+      number: 1,
+      url: "https://github.test/example/pr/1",
+    }),
   };
 }
 

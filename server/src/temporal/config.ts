@@ -24,6 +24,32 @@ export function readWorkerRepoPath(): string {
   return WORKER_REPO_PATH_DEFAULT;
 }
 
+// Read at activity boundary (not module load) so a worker boots even when
+// `TARGET_REPO_GITHUB_TOKEN` is not configured for environments that do not
+// exercise the GitHub adapter. The github-pr-open activity throws a
+// non-retryable ApplicationFailure when the token is missing.
+export function readGitHubToken(): string {
+  const raw = process.env.TARGET_REPO_GITHUB_TOKEN;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(
+      "TARGET_REPO_GITHUB_TOKEN is not set. Configure a GitHub PAT (`repo` for private, `public_repo` for public) on the orchestrator worker.",
+    );
+  }
+  return raw;
+}
+
+// Identifier embedded in the PR-body metadata block so the PR records which
+// model produced the change. Falls back to the literal `unknown` when unset
+// so deployments without explicit model pinning still emit a well-formed
+// metadata block.
+export function readClaudeModel(): string {
+  const raw = process.env.CLAUDE_MODEL;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    return "unknown";
+  }
+  return raw;
+}
+
 // Maximum corrective nudges the coder activity will send to the agent before
 // giving up the attempt with a retryable failure. Default 3; override via env
 // for tighter or looser budgets.

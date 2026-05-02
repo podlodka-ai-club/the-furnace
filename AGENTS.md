@@ -28,3 +28,25 @@ This project uses OpenSpec. Work is scoped as **changes** under `openspec/change
 - Use npm scripts documented in `TESTING.md` for test runs; avoid ad-hoc `npx` commands unless debugging the tool itself.
 - Commits reference the OpenSpec change they belong to.
 - Don't add dependencies outside of a change proposal that approves them.
+
+## Environment variables
+
+- `TARGET_REPO_GITHUB_TOKEN` — GitHub PAT used both at devcontainer build time (clone target repos) and by the orchestrator worker for the GitHub PR-open activity. Minimum scope: `repo` for private repos, `public_repo` for public. Read lazily by the PR-open activity (worker boots without it; the activity throws a non-retryable failure when missing).
+- `CLAUDE_MODEL` — optional; embedded in the PR-body metadata block (`Model:` line). Defaults to the literal `unknown` when unset.
+
+## PR-body metadata contract
+
+The PR-open activity emits a machine-parseable metadata block at the bottom of every PR body, delimited by HTML comments:
+
+```
+<!-- furnace:metadata -->
+Workflow-Id: <temporal workflow id>
+Ticket-Id: <linear issue id>
+Ticket-Identifier: <FUR-123>
+Attempt-Count: <integer>
+Model: <claude-... or 'unknown'>
+Final-Commit: <40-char SHA>
+<!-- /furnace:metadata -->
+```
+
+Keys are emitted in this exact order. Future automation (vote-aggregator, auto-merge) parses against the delimiters; do not rename keys or change the block format without coordinating with downstream consumers.

@@ -156,6 +156,10 @@ function buildOrchestratorActivities(opts: {
     listAgentReadyTicketsActivity: buildListActivity(),
     syncLinearTicketStateActivity: async () => {},
     validateRepoSlug: async () => {},
+    openPullRequestActivity: async () => ({
+      number: 1,
+      url: "https://github.test/example/pr/1",
+    }),
     launchWorkerContainer: async (
       input: LaunchWorkerContainerInput,
     ): Promise<LaunchWorkerContainerResult> => {
@@ -236,7 +240,10 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
         // and resolves once startChild ack returns — wait for the child to
         // actually finish so launchWorkerContainer has been invoked per phase.
         const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(issueNode.id));
-        await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+        await expect(ticketHandle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
       });
     });
 
@@ -490,7 +497,10 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
           expect(result.skipped).toBe(0);
 
           const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(goodNode.id));
-          await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+          await expect(ticketHandle.result()).resolves.toEqual({
+            status: "succeeded",
+            pr: { number: 1, url: "https://github.test/example/pr/1" },
+          });
         });
       });
     } finally {

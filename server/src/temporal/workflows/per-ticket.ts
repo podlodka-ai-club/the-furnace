@@ -13,10 +13,12 @@ import type {
   ReviewerTicket,
   SpecPhaseOutput,
 } from "../../agents/contracts/index.js";
+import type * as githubActivities from "../activities/github.js";
 import type * as linearActivities from "../activities/linear.js";
 import type * as workerLauncherActivities from "../activities/worker-launcher.js";
 import type { LaunchWorkerContainerResult } from "../activities/worker-launcher.js";
 import { PHASE_MAX_ATTEMPTS, phaseActivitiesForRepo } from "../dispatch.js";
+import { formatDiffSummary } from "../../github/trailers.js";
 
 const SPEC_AC_CLARIFICATION_FAILURE_TYPE = "AcClarificationRequested";
 const CODER_DEP_MISSING_FAILURE_TYPE = "DepMissingRequested";
@@ -41,6 +43,7 @@ export interface PerTicketWorkflowInput {
 
 export interface PerTicketWorkflowResult {
   status: "succeeded" | "cancelled";
+  pr?: { number: number; url: string };
 }
 
 export const cancelSignal = defineSignal("cancel");
@@ -73,6 +76,16 @@ const { validateRepoSlug } = proxyActivities<typeof workerLauncherActivities>({
     initialInterval: "1 second",
     backoffCoefficient: 2,
     maximumAttempts: 1,
+  },
+});
+
+const { openPullRequestActivity } = proxyActivities<typeof githubActivities>({
+  startToCloseTimeout: "1 minute",
+  retry: {
+    initialInterval: "2 seconds",
+    backoffCoefficient: 2,
+    maximumInterval: "30 seconds",
+    maximumAttempts: 3,
   },
 });
 
@@ -138,6 +151,21 @@ export async function perTicketWorkflow(
     return { status: "cancelled" };
   }
 
+  // TODO(review-agent): once review-agent lands, move this PR-open call onto
+  // the review approve path and gate it on `reviewOutput.verdict === "approve"`.
+  // The runReviewPhase no-op is intentionally left in place below so the
+  // workflow shape (spec → coder → review → completed) and the currentPhase
+  // query semantics survive until that change ships.
+  const pr = await openPullRequestActivity({
+    featureBranch: coderOutput.featureBranch,
+    targetRepoSlug: input.targetRepoSlug,
+    ticket: input.ticket,
+    workflowId: workflowInfo().workflowId,
+    attemptCount,
+    finalCommitSha: coderOutput.finalCommitSha,
+    diffSummary: formatDiffSummary(coderOutput.diffStat),
+  });
+
   const reviewerInput: ReviewerInput = {
     ...coderOutput,
     ticket: input.ticket,
@@ -152,7 +180,7 @@ export async function perTicketWorkflow(
     ticketId: input.ticket.id,
     stateName: "Done",
   });
-  return { status: "succeeded" };
+  return { status: "succeeded", pr };
 
   async function runSpecPhaseWithRecording(): Promise<SpecPhaseOutput | null> {
     return await runPhase("spec", () => runSpecPhase({ ticket: input.ticket }), {
