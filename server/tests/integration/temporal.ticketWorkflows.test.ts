@@ -300,6 +300,7 @@ function buildBaseActivities(): TemporalWorkerActivities {
     ): Promise<LaunchWorkerContainerResult> => ({
       containerId: `stub-${input.attemptId}`,
       queue: taskQueueForRepo(input.repoSlug),
+      logsPath: `/tmp/test-logs/${input.attemptId}`,
     }),
     validateRepoSlug: async (_input: { slug: string }): Promise<void> => {},
   };

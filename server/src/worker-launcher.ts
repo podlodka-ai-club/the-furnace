@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ export interface LaunchWorkerContainerInput {
 export interface LaunchWorkerContainerResult {
   containerId: string;
   queue: string;
+  logsPath: string;
 }
 
 interface LauncherEnv {
@@ -29,6 +30,7 @@ interface LauncherEnv {
   workerBundleDir: string;
   claudeCredsDir: string;
   buildDir: string;
+  logsDir: string;
   claudeCodeOauthToken: string | null;
   anthropicApiKey: string | null;
 }
@@ -57,6 +59,9 @@ export async function launchWorkerContainer(
   const manifest = await (options.loadManifest ?? loadManifest)(input.repoSlug, env.buildDir);
   const queue = taskQueueForRepo(input.repoSlug);
 
+  const attemptLogsDir = path.join(env.logsDir, input.attemptId);
+  await mkdir(attemptLogsDir, { recursive: true });
+
   const dockerArgs: string[] = [
     "run",
     "--rm",
@@ -83,14 +88,17 @@ export async function launchWorkerContainer(
     `type=bind,source=${env.claudeCredsDir},target=/root/.claude,readonly`,
     "--mount",
     `type=bind,source=${env.workerBundleDir},target=/opt/furnace,readonly`,
+    "--mount",
+    `type=bind,source=${attemptLogsDir},target=/var/log/furnace`,
     manifest.imageRef,
-    "node",
-    "/opt/furnace/worker-entry.js",
+    "sh",
+    "-c",
+    "exec node /opt/furnace/worker-entry.js 2>&1 | tee /var/log/furnace/container.log",
   ];
 
   const docker = options.runDocker ?? defaultRunDocker;
   const { containerId } = await docker(dockerArgs);
-  return { containerId, queue };
+  return { containerId, queue, logsPath: attemptLogsDir };
 }
 
 function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
@@ -107,6 +115,7 @@ function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
     workerBundleDir: env.WORKER_BUNDLE_DIR ?? path.join(repoRoot, "dist", "worker"),
     claudeCredsDir: env.CLAUDE_CREDS_DIR ?? path.join(os.homedir(), ".claude"),
     buildDir: env.BUILD_DIR ?? path.join(repoRoot, "build"),
+    logsDir: env.LOGS_DIR ?? path.join(repoRoot, "data", "logs"),
     claudeCodeOauthToken: rawOauth && rawOauth.length > 0 ? rawOauth : null,
     anthropicApiKey: rawAnthropic && rawAnthropic.length > 0 ? rawAnthropic : null,
   };

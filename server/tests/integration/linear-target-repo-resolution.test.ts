@@ -175,6 +175,7 @@ function buildOrchestratorActivities(opts: {
       return {
         containerId: `stub-${input.attemptId}`,
         queue: taskQueueForRepo(input.repoSlug),
+        logsPath: `/tmp/test-logs/${input.attemptId}`,
       };
     },
   };

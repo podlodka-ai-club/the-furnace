@@ -35,11 +35,14 @@ LINEAR_STATE_ID_CANCELED=state_xxx
 # Optional poll cadence override (default: 1m)
 TEMPORAL_LINEAR_POLLER_EVERY=1m
 
-# Start the dev server (tsx watch)
+# Run the dev server to run migrations and check envs (tsx watch)
 npm run dev
 
 # Start local Temporal + UI (required for workflow tests)
 docker compose up -d temporal temporal-ui
+
+# Run temporal orchestrator
+npm run --prefix server temporal:worker
 
 # Run the full test suite.
 # Use an isolated task queue if a local Temporal worker is already running.
@@ -60,9 +63,6 @@ npm run --prefix server test
 
 # One test file
 npm run --prefix server test -- tests/integration/linear.test.ts
-
-# Vitest watch mode
-cd server && npx vitest
 ```
 
 When the app worker boots, it ensures a recurring Temporal schedule exists for `linearPollerWorkflow` so `agent-ready` + `Todo` Linear tickets are polled automatically (default every 1 minute).

@@ -16,7 +16,6 @@ This project uses OpenSpec. Work is scoped as **changes** under `openspec/change
 - Orchestration: Temporal (added in `temporal-setup` change)
 - Agent framework: Claude Agent SDK (added in `spec-agent` / `coder-agent` changes)
 - Database: PGLite for dev/test, PostgreSQL for production. Never require a running Postgres for local dev.
-- Tests: Vitest (unit + integration via Supertest)
 
 ## Conventions
 

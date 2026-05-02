@@ -1,6 +1,9 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn, type ChildProcess } from "node:child_process";
+import { stat } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assertWorkerAuthAvailable,
@@ -8,6 +11,8 @@ import {
   type LaunchWorkerContainerInput,
   type LaunchWorkerContainerOptions,
 } from "../src/worker-launcher.js";
+
+const statAsync = promisify(stat);
 
 const fakeManifest = async (): Promise<{ imageRef: string }> => ({
   imageRef: "registry.example/test@sha256:abc",
@@ -20,12 +25,18 @@ const baseInput: LaunchWorkerContainerInput = {
   repoSlug: "test-repo",
 };
 
+async function withTmpLogsDir(env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
+  if (env.LOGS_DIR) return env;
+  const dir = await mkdtemp(path.join(os.tmpdir(), "furnace-logs-"));
+  return { ...env, LOGS_DIR: dir };
+}
+
 async function runLauncherCapturingArgs(
   env: NodeJS.ProcessEnv,
 ): Promise<string[]> {
   let captured: string[] = [];
   const options: LaunchWorkerContainerOptions = {
-    env,
+    env: await withTmpLogsDir(env),
     loadManifest: fakeManifest,
     runDocker: async (args) => {
       captured = args;
@@ -40,7 +51,7 @@ const credsMountPattern = /^type=bind,source=.+,target=\/root\/\.claude,readonly
 
 describe("launchWorkerContainer docker args", () => {
   it("uses REPO_ROOT override for default build and bundle dirs", async () => {
-    const repoRoot = "/tmp/custom-repo-root";
+    const repoRoot = await mkdtemp(path.join(os.tmpdir(), "furnace-repo-root-"));
     let capturedBuildDir = "";
     let captured: string[] = [];
 
@@ -64,6 +75,12 @@ describe("launchWorkerContainer docker args", () => {
     expect(mountValues).toContain(
       `type=bind,source=${path.join(repoRoot, "dist", "worker")},target=/opt/furnace,readonly`,
     );
+    // Default LOGS_DIR is `<repoRoot>/data/logs`; the per-attempt subdir is
+    // mounted read-write at /var/log/furnace.
+    expect(mountValues).toContain(
+      `type=bind,source=${path.join(repoRoot, "data", "logs", baseInput.attemptId)},target=/var/log/furnace`,
+    );
+    await rm(repoRoot, { recursive: true, force: true });
   });
 
   it("forwards ANTHROPIC_API_KEY env var alongside the credentials mount", async () => {
@@ -184,6 +201,119 @@ function collectMountValues(args: string[]): string[] {
     }
   }
   return mounts;
+}
+
+describe("launchWorkerContainer log mount", () => {
+  let logsDir: string;
+
+  beforeEach(async () => {
+    logsDir = await mkdtemp(path.join(os.tmpdir(), "furnace-logs-"));
+  });
+
+  afterEach(async () => {
+    await rm(logsDir, { recursive: true, force: true });
+  });
+
+  it("mounts the per-attempt log dir read-write, creates it on disk, and surfaces logsPath", async () => {
+    let captured: string[] = [];
+    const result = await launchWorkerContainer(baseInput, {
+      env: {
+        WORKER_BUNDLE_DIR: "/tmp/bundle",
+        CLAUDE_CREDS_DIR: "/tmp/creds",
+        BUILD_DIR: "/tmp/build",
+        LOGS_DIR: logsDir,
+      },
+      loadManifest: fakeManifest,
+      runDocker: async (args) => {
+        captured = args;
+        return { containerId: "fake-container" };
+      },
+    });
+
+    const expectedAttemptDir = path.join(logsDir, baseInput.attemptId);
+
+    // (a) bind mount with no readonly flag, target /var/log/furnace
+    const mountValues = collectMountValues(captured);
+    expect(mountValues).toContain(
+      `type=bind,source=${expectedAttemptDir},target=/var/log/furnace`,
+    );
+    expect(
+      mountValues.some((v) =>
+        v.startsWith(`type=bind,source=${expectedAttemptDir},target=/var/log/furnace`)
+        && v.includes("readonly"),
+      ),
+    ).toBe(false);
+
+    // (b) per-attempt directory exists on disk
+    const stats = await statAsync(expectedAttemptDir);
+    expect(stats.isDirectory()).toBe(true);
+
+    // (c) result includes logsPath
+    expect(result.logsPath).toBe(expectedAttemptDir);
+
+    // (d) trailing argv invokes sh -c with the tee wrapper
+    expect(captured.slice(-3)).toEqual([
+      "sh",
+      "-c",
+      "exec node /opt/furnace/worker-entry.js 2>&1 | tee /var/log/furnace/container.log",
+    ]);
+  });
+
+  it("captures host-side container.log when the worker entry runs as a child process under tee", async () => {
+    // Stub runDocker to spawn a child mimicking the container CMD pattern:
+    // `sh -c '... | tee <hostPath>'`. Asserts that worker stdout/stderr
+    // ends up in container.log on the host even after the child exits,
+    // simulating --rm.
+    const expectedAttemptDir = path.join(logsDir, baseInput.attemptId);
+    const containerLog = path.join(expectedAttemptDir, "container.log");
+
+    const result = await launchWorkerContainer(baseInput, {
+      env: {
+        WORKER_BUNDLE_DIR: "/tmp/bundle",
+        CLAUDE_CREDS_DIR: "/tmp/creds",
+        BUILD_DIR: "/tmp/build",
+        LOGS_DIR: logsDir,
+      },
+      loadManifest: fakeManifest,
+      runDocker: async (args) => {
+        // Find the sh -c wrapper and rewrite the in-container path to the
+        // host-side path so the host shell can tee to it directly.
+        const idx = args.findIndex((a) => a === "sh");
+        expect(args[idx + 1]).toBe("-c");
+        const innerCmd = args[idx + 2];
+        // Rewrite: the production CMD writes to /var/log/furnace which
+        // resolves via the bind mount to expectedAttemptDir on the host.
+        const hostCmd = innerCmd.replace(
+          "/var/log/furnace/container.log",
+          containerLog,
+        );
+        // Replace the bundled-node invocation with a host-side echo that
+        // mimics worker-entry.ts:76's "[container-worker] starting ..." banner.
+        const stubbedCmd = hostCmd.replace(
+          /exec node \/opt\/furnace\/worker-entry\.js/,
+          "echo '[container-worker] starting repo=test-repo languages=<none> tools=<none> attempt=attempt-1'",
+        );
+        await new Promise<void>((resolve, reject) => {
+          const child = spawnSh(stubbedCmd);
+          child.once("error", reject);
+          child.once("exit", (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`stub exited ${code}`));
+          });
+        });
+        return { containerId: "stub-container" };
+      },
+    });
+
+    expect(result.logsPath).toBe(expectedAttemptDir);
+
+    const contents = await readFile(containerLog, "utf8");
+    expect(contents).toContain("[container-worker] starting");
+  });
+});
+
+function spawnSh(cmd: string): ChildProcess {
+  return spawn("sh", ["-c", cmd], { stdio: ["ignore", "inherit", "inherit"] });
 }
 
 describe("assertWorkerAuthAvailable", () => {

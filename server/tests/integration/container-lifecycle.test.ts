@@ -108,6 +108,7 @@ function buildOrchestratorActivities(
       return {
         containerId: spawned?.containerId ?? `noop-${input.attemptId}`,
         queue: taskQueueForRepo(input.repoSlug),
+        logsPath: `/tmp/test-logs/${input.attemptId}`,
       };
     },
     ...overrides,
