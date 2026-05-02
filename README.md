@@ -12,7 +12,7 @@ See [`openspec/concept.md`](openspec/concept.md) for the full concept and [`open
 | Orchestration | Temporal (added in `temporal-setup`) |
 | Agent framework | Claude Agent SDK (added with `spec-agent`/`coder-agent`) |
 | Workflow state | Temporal (orchestrator runs without its own database) |
-| Tests | Vitest (unit + Supertest integration) |
+| Tests | Vitest (unit, integration, workflow, and root tooling tests) |
 | External integrations | Linear, GitHub, Slack |
 
 ## Getting started
@@ -35,17 +35,17 @@ LINEAR_STATE_ID_CANCELED=state_xxx
 # Optional poll cadence override (default: 1m)
 TEMPORAL_LINEAR_POLLER_EVERY=1m
 
-# DEPRECATED: Run the dev server (tsx watch)
-# npm run dev
-
-# Start local Temporal + UI (required for workflow tests)
+# Start local Temporal + UI (required for workflow tests and local orchestration)
 docker compose up -d temporal temporal-ui
 
-# Run temporal orchestrator
+# Run the Temporal orchestrator for local Linear polling/workflow execution.
+# Tests create their own workers, so this is not needed just to run tests.
 npm run --prefix server temporal:worker
 
-# Run the full test suite.
-# Use an isolated task queue if a local Temporal worker is already running.
+# Optional: run the HTTP health server on port 3000
+npm run dev
+
+# Run the full test suite before completing code changes
 TEMPORAL_TASK_QUEUE=local-test npm test
 ```
 
@@ -53,17 +53,9 @@ Dev server listens on port 3000. The `/health` endpoint is the first thing to la
 Temporal frontend is available at `localhost:7233` (gRPC API for SDK/client/worker traffic; not a browser page).
 Temporal UI is available at `http://localhost:8233` (human web interface).
 
-`npm test` runs the server Vitest suite first, then root devcontainer build-script tests. The workflow tests create their own Temporal workers, so you do not need to start `npm run --prefix server temporal:worker` for tests. If that long-running worker is already running on the default `the-furnace` task queue, either stop it or run tests with a unique `TEMPORAL_TASK_QUEUE` as shown above; otherwise it can pick up test workflow tasks and cause confusing failures.
+`npm test` and `npm run test` are the same root command. They run the server Vitest suite first, then root devcontainer build-script tests. Use the `TEMPORAL_TASK_QUEUE=local-test` form when a local app worker may already be running on the default `the-furnace` queue.
 
-For focused runs:
-
-```bash
-# Server tests only
-npm run --prefix server test
-
-# One test file
-npm run --prefix server test -- tests/integration/linear.test.ts
-```
+Focused, watch, and E2E test commands are documented in [`TESTING.md`](TESTING.md).
 
 When the app worker boots, it ensures a recurring Temporal schedule exists for `linearPollerWorkflow` so `agent-ready` + `Todo` Linear tickets are polled automatically (default every 1 minute).
 
@@ -85,7 +77,7 @@ The mount is retained regardless of which env var is set, because `~/.claude` al
 
 ## Devcontainer image builds
 
-`devcontainer-images` adds a per-target-repo image build pipeline. Tracked repos live in `build/repos.json`; each entry's `slug` must equal the normalized `<owner>-<name>` value.
+`devcontainer-images` adds a per-target-repo image build pipeline. Tracked repos are read from local `build/repos.json`; the committed template is `build/repos.example.json`. Each entry's `slug` must equal the normalized `<owner>-<name>` value.
 
 Required environment variables:
 
@@ -111,11 +103,11 @@ npm run build:devcontainer -- --repo <repo-slug> --sha <commit-sha>
 npm run test:devcontainer:e2e
 ```
 
-Successful builds write `build/<repo-slug>/manifest.json` with the digest-pinned `imageRef` consumed by later runtime work. The alias tags `:sha-<commit>` and `:main` are for human discovery only. For MVP, image builds are intended to be run on demand when the Linear-driven orchestrator picks up a ticket and resolves the target repo/ref to an exact commit SHA.
+Successful registry-backed builds write local `build/<repo-slug>/manifest.json` with the digest-pinned `imageRef` consumed by later runtime work. The alias tags `:sha-<commit>` and `:main` are for human discovery only. For MVP, image builds are intended to be run on demand when the Linear-driven orchestrator picks up a ticket and resolves the target repo/ref to an exact commit SHA.
 
-The local E2E helper starts or reuses `furnace-local-registry-5001`, resolves the demo repo's current SHA, supplies local-only env defaults, builds the image, pulls it by digest, and runs a container smoke check. It writes a localhost manifest under `build/<repo-slug>/manifest.json`; treat that file as local test output.
+The local E2E helper starts or reuses `furnace-local-registry-5001`, resolves the demo repo's current SHA, supplies local-only env defaults, builds the image, pulls it by digest, and runs a container smoke check. It writes a localhost manifest under `build/<repo-slug>/manifest.local.json`; treat that file as local test output.
 
-The GitHub Actions workflow is a manual `workflow_dispatch` entry point for rebuilds and debugging. It commits generated manifest updates back to `main` with the default `GITHUB_TOKEN`. Repositories using protected `main` branches must allow GitHub Actions to push those generated manifest commits, or replace the commit-back step with a PR-opening flow before using the workflow.
+The GitHub Actions workflow is a manual `workflow_dispatch` entry point for rebuilds and debugging. It builds the requested image with the configured registry and target-repo secrets; generated manifests stay in the workflow workspace and are not committed back to this repo.
 
 ## Spec-driven workflow
 

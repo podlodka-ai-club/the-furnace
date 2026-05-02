@@ -17,13 +17,14 @@ This project uses OpenSpec. Work is scoped as **changes** under `openspec/change
 ## Implementation rules
 
 - Follow the proposal's `What Changes` and `Capabilities` sections — do not expand scope.
-- Run tests how described in `TESTING.md` from the repo root before declaring work complete.
-- Integration tests must run against real Temporal (workflow run state lives there), not mocks.
+- For code changes, run the applicable checks from `TESTING.md` before declaring work complete. The default full verification command is `TEMPORAL_TASK_QUEUE=local-test npm test` from the repo root.
+- Documentation-only changes may skip code tests when no runtime files changed; say so explicitly in the final response.
+- Workflow/integration tests must run against real Temporal (workflow run state lives there), not mocks.
 - Never modify `openspec/concept.md`; amend `proposal.md` if scope shifts.
 
 ## Conventions
 
 - Strict TypeScript. No `any` unless justified in a comment.
-- Integration tests run against real Temporal, not mocks.
+- Use npm scripts documented in `TESTING.md` for test runs; avoid ad-hoc `npx` commands unless debugging the tool itself.
 - Commits reference the OpenSpec change they belong to.
 - Don't add dependencies outside of a change proposal that approves them.
