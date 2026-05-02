@@ -166,7 +166,9 @@ describe("devcontainer image build contracts", () => {
     });
 
     expect(dockerfile).toContain("FROM furnace-acme-app-base:abc123");
-    expect(dockerfile).toContain('COPY ["source/", "/workspaces/app/"]');
+    expect(dockerfile).toContain('COPY --chown=node:node ["source/", "/workspaces/app/"]');
+    expect(dockerfile).toContain("RUN chown -R node:node /workspaces/app");
+    expect(dockerfile).toContain("USER node");
     expect(dockerfile).toContain("RUN npm ci");
     expect(dockerfile).not.toMatch(/onCreateCommand|updateContentCommand|postCreateCommand|postStartCommand/);
     expect(dockerfile).not.toContain("/opt/furnace");

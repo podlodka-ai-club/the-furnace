@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { spawn as childSpawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   createSdkMcpServer,
   query,
@@ -53,6 +55,8 @@ class SdkSpecAgentSession implements SpecAgentSession {
   constructor(private readonly options: SpecAgentRunOptions) {}
 
   start(): void {
+    probeCliBinary();
+
     const mcpServer = this.buildMcpServer();
     const inputStream = this.makeInputStream();
 
@@ -69,6 +73,43 @@ class SdkSpecAgentSession implements SpecAgentSession {
         allowDangerouslySkipPermissions: true,
         persistSession: false,
         settingSources: [],
+        // Forward the spawned Claude Code CLI's stderr to our log so spawn
+        // failures (auth missing, runtime mismatch, etc.) are diagnosable.
+        // Without this, ProcessTransport silences child stderr and we only
+        // see the downstream "not ready for writing" error.
+        stderr: (chunk) => {
+          process.stderr.write(`[claude-cli] ${chunk}`);
+        },
+        // Force SDK-internal debug logging (spawn cmd + exit code + lifecycle
+        // events get written via logForSdkDebugging). Combined with
+        // stdio:"pipe", this gives us the child's own stderr too.
+        env: { ...process.env, DEBUG_CLAUDE_AGENT_SDK: "1" },
+        // Diagnostic: intercept the SDK's spawn so we see the exact command
+        // and args, plus a fully captured exit/output trail. Without this,
+        // ProcessTransport silently swallows the child's lifecycle.
+        spawnClaudeCodeProcess: (opts) => {
+          process.stderr.write(
+            `[cli-spawn] command=${opts.command}\n[cli-spawn] args=${JSON.stringify(opts.args)}\n[cli-spawn] cwd=${opts.cwd ?? "<inherited>"}\n`,
+          );
+          const child = childSpawn(opts.command, opts.args, {
+            cwd: opts.cwd,
+            env: opts.env,
+            signal: opts.signal,
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          child.stderr?.on("data", (d: Buffer) => {
+            process.stderr.write(`[cli-spawn stderr] ${d.toString()}`);
+          });
+          child.on("error", (err) => {
+            process.stderr.write(`[cli-spawn error] ${err.message}\n`);
+          });
+          child.on("exit", (code, signal) => {
+            process.stderr.write(
+              `[cli-spawn exit] code=${code} signal=${signal ?? "<none>"}\n`,
+            );
+          });
+          return child;
+        },
       },
     });
     this.querying = q;
@@ -253,6 +294,38 @@ class SdkSpecAgentSession implements SpecAgentSession {
         break;
       }
     }
+  }
+}
+
+// Diagnostic probe: spawns the bundled Claude Code cli.js with `--version`
+// SYNCHRONOUSLY, so its stdout/stderr/exit are captured before the SDK's
+// ProcessTransport runs and (currently) crashes the worker. Without this we
+// only see the downstream "ProcessTransport is not ready for writing" error.
+function probeCliBinary(): void {
+  try {
+    const req = createRequire(import.meta.url);
+    const cliPath = req.resolve("@anthropic-ai/claude-agent-sdk/cli.js");
+    process.stderr.write(`[cli-probe] resolved cli.js -> ${cliPath}\n`);
+    const result = spawnSync(process.execPath, [cliPath, "--version"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 10_000,
+    });
+    if (result.error) {
+      process.stderr.write(`[cli-probe error] ${result.error.message}\n`);
+    }
+    if (result.stdout && result.stdout.length > 0) {
+      process.stderr.write(`[cli-probe stdout] ${result.stdout.toString()}`);
+    }
+    if (result.stderr && result.stderr.length > 0) {
+      process.stderr.write(`[cli-probe stderr] ${result.stderr.toString()}`);
+    }
+    process.stderr.write(
+      `[cli-probe exit] status=${result.status} signal=${result.signal ?? "<none>"}\n`,
+    );
+  } catch (err) {
+    process.stderr.write(
+      `[cli-probe] failed to spawn: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
   }
 }
 

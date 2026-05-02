@@ -214,8 +214,13 @@ export function renderWarmupDockerfile(input: {
 }): string {
   const lines = [
     `FROM ${input.baseImage}`,
+    `USER root`,
     `WORKDIR ${input.workspacePath}`,
-    `COPY ["source/", "${withTrailingSlash(input.workspacePath)}"]`,
+    `COPY --chown=node:node ["source/", "${withTrailingSlash(input.workspacePath)}"]`,
+    `RUN chown -R node:node ${input.workspacePath}`,
+    `USER node`,
+    `RUN git config --global user.email "agent@the-furnace.local" \\`,
+    `    && git config --global user.name "The Furnace Agent"`,
   ];
 
   if (input.warmupCommand) {
@@ -469,7 +474,23 @@ async function cloneRepoAtCommit(
     await runProcess("git", ["init", checkoutDir], { secrets });
     await runProcess("git", ["-C", checkoutDir, "remote", "add", "origin", remoteUrl], { secrets });
     await runProcess("git", ["-C", checkoutDir, "fetch", "--depth", "1", "origin", commitSha], { secrets });
-    await runProcess("git", ["-C", checkoutDir, "checkout", "--detach", "FETCH_HEAD"], { secrets });
+    // Check out as a local branch matching the configured ref (e.g. "main")
+    // so the spec/coder agents can branch off `main` inside the container.
+    // A bare `--detach` would leave the worktree with no local branch refs,
+    // and `git checkout -B feature main` would then fail.
+    await runProcess("git", ["-C", checkoutDir, "checkout", "-b", repo.ref, "FETCH_HEAD"], { secrets });
+    // Mirror the remote-tracking ref so `origin/HEAD` resolution and
+    // `git fetch origin <ref>` work as the agents expect.
+    await runProcess(
+      "git",
+      ["-C", checkoutDir, "update-ref", `refs/remotes/origin/${repo.ref}`, "FETCH_HEAD"],
+      { secrets },
+    );
+    await runProcess(
+      "git",
+      ["-C", checkoutDir, "symbolic-ref", "refs/remotes/origin/HEAD", `refs/remotes/origin/${repo.ref}`],
+      { secrets },
+    );
   } catch (error) {
     if (error instanceof Error) {
       throw new DevcontainerImageBuildError(

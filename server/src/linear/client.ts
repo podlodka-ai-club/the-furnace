@@ -236,7 +236,6 @@ export function createLinearClient(options: CreateLinearClientOptions = {}): Lin
               parentId: string;
               title: string;
               description: string;
-              labelIds: string[];
             };
           }
         >(CREATE_SUB_TICKET_MUTATION, {
@@ -245,7 +244,6 @@ export function createLinearClient(options: CreateLinearClientOptions = {}): Lin
             parentId,
             title,
             description,
-            labelIds: [type],
           },
         });
 
