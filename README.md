@@ -83,6 +83,9 @@ TARGET_REPO_GITHUB_TOKEN=github_read_token_for_target_repos
 Build commands:
 
 ```bash
+# Build worker
+npm run build:worker
+
 # Build one repo at its current configured ref
 npm run build:devcontainer -- --repo <repo-slug>
 
