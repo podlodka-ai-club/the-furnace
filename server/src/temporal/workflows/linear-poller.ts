@@ -44,7 +44,13 @@ export async function linearPollerWorkflow(): Promise<LinearPollerWorkflowResult
           },
         ],
         workflowId,
-        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+        // Allow re-running a per-ticket workflow only when the previous run
+        // ended in failure (e.g. acClarificationRequested). A successful run
+        // is a terminal "shipped" state and must not be retriggered by the
+        // poller; a failed run reflects a recoverable condition (operator
+        // answered the clarification, fixed AC, etc.) so the next poll can
+        // pick the ticket back up.
+        workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         parentClosePolicy: ParentClosePolicy.ABANDON,
       });
       started += 1;
