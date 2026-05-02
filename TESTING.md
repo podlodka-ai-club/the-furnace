@@ -5,6 +5,7 @@
 | Command | What it runs |
 |---|---|
 | `npm test` | Server unit + integration tests, then root devcontainer build-script tests (Vitest) |
+| `TEMPORAL_TASK_QUEUE=local-test npm test` | Same full suite, isolated from any already-running app worker on the default queue |
 | `cd server && npx vitest` | Watch mode from the server package |
 | `cd server && npx vitest run tests/integration` | Just integration tests |
 | `npm run build:devcontainer -- --repo <slug>` | Registry-backed devcontainer image build for one tracked repo |
@@ -20,6 +21,8 @@
 | Workflow | Temporal + Vitest | `server/tests/integration/temporal.*.test.ts` | Requires local Temporal services on `localhost:7233` |
 
 There is no end-to-end test tier — this project has no user-facing frontend. Human-visible behavior runs through Linear, GitHub, and Slack, all covered by integration tests that stub those APIs at the HTTP layer.
+
+Workflow tests create their own Temporal workers. Do not start `npm run --prefix server temporal:worker` just to run tests. If the app worker is already running on the default `the-furnace` task queue, stop it or set `TEMPORAL_TASK_QUEUE` to a unique value for the test command; otherwise the app worker can consume test workflow tasks with production activities.
 
 ## Database strategy
 
