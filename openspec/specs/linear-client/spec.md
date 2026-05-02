@@ -1,5 +1,9 @@
 # linear-client Specification
 
+## Purpose
+
+Defines how the Linear client discovers agent-ready tickets, resolves their target repository slug from Linear labels, returns typed ticket data, and covers the Linear-to-workflow dispatch path in integration tests.
+
 ## Requirements
 
 ### Requirement: Linear client lists agent-ready tickets using typed results

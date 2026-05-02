@@ -1,5 +1,9 @@
 # orchestration-substrate Specification
 
+## Purpose
+
+Defines the Temporal runtime substrate: client bootstrap, long-lived orchestrator worker registration, ephemeral container worker separation, local Temporal compose services, and smoke-workflow coverage.
+
 ## Requirements
 
 ### Requirement: Temporal client bootstrap is available to runtime code
