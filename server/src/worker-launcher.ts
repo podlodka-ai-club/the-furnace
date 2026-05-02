@@ -33,10 +33,13 @@ interface LauncherEnv {
   logsDir: string;
   claudeCodeOauthToken: string | null;
   anthropicApiKey: string | null;
+  linearApiKey: string | null;
+  linearTeamId: string | null;
 }
 
 interface ManifestRead {
   imageRef: string;
+  workspacePath: string;
 }
 
 function resolveDefaultRepoRoot(): string {
@@ -66,10 +69,14 @@ export async function launchWorkerContainer(
     "run",
     "--rm",
     "-d",
+    "--user",
+    "node",
     "--env",
     `WORKER_REPO=${input.repoSlug}`,
     "--env",
     `WORKER_ATTEMPT_ID=${input.attemptId}`,
+    "--env",
+    `WORKER_REPO_PATH=${manifest.workspacePath}`,
     "--env",
     `TEMPORAL_ADDRESS=${env.containerTemporalAddress}`,
     "--env",
@@ -84,8 +91,18 @@ export async function launchWorkerContainer(
     ...(env.anthropicApiKey
       ? ["--env", `ANTHROPIC_API_KEY=${env.anthropicApiKey}`]
       : []),
-    "--mount",
-    `type=bind,source=${env.claudeCredsDir},target=/root/.claude,readonly`,
+    ...(env.linearApiKey
+      ? ["--env", `LINEAR_API_KEY=${env.linearApiKey}`]
+      : []),
+    ...(env.linearTeamId
+      ? ["--env", `LINEAR_TEAM_ID=${env.linearTeamId}`]
+      : []),
+    ...(env.claudeCodeOauthToken || env.anthropicApiKey
+      ? []
+      : [
+          "--mount",
+          `type=bind,source=${env.claudeCredsDir},target=/home/node/.claude,readonly`,
+        ]),
     "--mount",
     `type=bind,source=${env.workerBundleDir},target=/opt/furnace,readonly`,
     "--mount",
@@ -108,6 +125,8 @@ function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
   const temporalAddress = env.TEMPORAL_ADDRESS ?? "localhost:7233";
   const rawOauth = env.CLAUDE_CODE_OAUTH_TOKEN;
   const rawAnthropic = env.ANTHROPIC_API_KEY;
+  const rawLinearKey = env.LINEAR_API_KEY;
+  const rawLinearTeam = env.LINEAR_TEAM_ID;
   return {
     temporalAddress,
     containerTemporalAddress: env.CONTAINER_TEMPORAL_ADDRESS ?? temporalAddress,
@@ -118,6 +137,8 @@ function readLauncherEnv(env: NodeJS.ProcessEnv): LauncherEnv {
     logsDir: env.LOGS_DIR ?? path.join(repoRoot, "data", "logs"),
     claudeCodeOauthToken: rawOauth && rawOauth.length > 0 ? rawOauth : null,
     anthropicApiKey: rawAnthropic && rawAnthropic.length > 0 ? rawAnthropic : null,
+    linearApiKey: rawLinearKey && rawLinearKey.length > 0 ? rawLinearKey : null,
+    linearTeamId: rawLinearTeam && rawLinearTeam.length > 0 ? rawLinearTeam : null,
   };
 }
 
@@ -162,11 +183,14 @@ async function loadManifest(slug: string, buildDir: string): Promise<ManifestRea
     manifestPath = ciPath;
     raw = await readFile(ciPath, "utf8");
   }
-  const parsed = JSON.parse(raw) as { imageRef?: unknown };
+  const parsed = JSON.parse(raw) as { imageRef?: unknown; workspacePath?: unknown };
   if (typeof parsed.imageRef !== "string" || parsed.imageRef.length === 0) {
     throw new Error(`Manifest at ${manifestPath} is missing 'imageRef'`);
   }
-  return { imageRef: parsed.imageRef };
+  if (typeof parsed.workspacePath !== "string" || parsed.workspacePath.length === 0) {
+    throw new Error(`Manifest at ${manifestPath} is missing 'workspacePath'`);
+  }
+  return { imageRef: parsed.imageRef, workspacePath: parsed.workspacePath };
 }
 
 async function defaultRunDocker(args: string[]): Promise<{ containerId: string }> {

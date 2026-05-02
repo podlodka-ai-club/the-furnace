@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, stat, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 
 // Build the container worker bundle. The output directory is bind-mounted
@@ -50,6 +50,11 @@ async function main(argv: string[]): Promise<void> {
     cwd: options.repoRoot,
   });
 
+  // tsc only emits .ts → .js. Non-code assets (e.g. agent prompt templates)
+  // must be copied alongside their importer so `new URL("./prompt.md",
+  // import.meta.url)` resolves at runtime in the bind-mounted bundle.
+  await copyAssets(path.join(options.repoRoot, "server", "src"), distDir);
+
   await writePackageJson(distDir, options);
 
   if (options.skipInstall) {
@@ -82,6 +87,26 @@ async function writePackageJson(distDir: string, options: BuildOptions): Promise
   };
 
   await writeFile(path.join(distDir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
+const ASSET_EXTENSIONS: ReadonlySet<string> = new Set([".md"]);
+
+async function copyAssets(srcRoot: string, destRoot: string): Promise<void> {
+  const entries = await readdir(srcRoot);
+  for (const entry of entries) {
+    const srcPath = path.join(srcRoot, entry);
+    const destPath = path.join(destRoot, entry);
+    const info = await stat(srcPath);
+    if (info.isDirectory()) {
+      await mkdir(destPath, { recursive: true });
+      await copyAssets(srcPath, destPath);
+      continue;
+    }
+    if (!ASSET_EXTENSIONS.has(path.extname(entry))) continue;
+    await mkdir(path.dirname(destPath), { recursive: true });
+    await copyFile(srcPath, destPath);
+    console.log(`[build:worker] copied asset ${path.relative(process.cwd(), destPath)}`);
+  }
 }
 
 async function ensureRuntimeDeps(distDir: string, options: BuildOptions): Promise<void> {

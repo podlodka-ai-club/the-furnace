@@ -7,7 +7,6 @@ import {
   runSpecPhase,
   SPEC_CORRECTION_BUDGET,
   SPEC_FAILURE_TYPES,
-  type FetchTicket,
   type RunSpecPhaseDeps,
 } from "../../../src/agents/spec/activity.js";
 import type {
@@ -19,7 +18,7 @@ import type {
 import type {
   RunCommand,
   RunCommandResult,
-} from "../../../src/agents/spec/repo-ops.js";
+} from "../../../src/agents/shared/repo-ops.js";
 import type { LinearClientApi, CreatedSubTicket } from "../../../src/linear/types.js";
 import type { ReviewerTicket } from "../../../src/agents/contracts/index.js";
 
@@ -65,13 +64,6 @@ function makeStubAgentClient(
     },
   };
   return { client, calls, opts };
-}
-
-function makeFetchTicket(): FetchTicket {
-  return async (id: string) => {
-    if (id !== TICKET.id) return null;
-    return { title: "Implement feature X", description: "User can do X." };
-  };
 }
 
 interface ScriptedRunCommandStep {
@@ -127,7 +119,6 @@ function makeBaseDeps(overrides: Partial<RunSpecPhaseDeps> = {}): RunSpecPhaseDe
       namespace: "default",
       attempt: 1,
     }),
-    fetchTicket: makeFetchTicket(),
     linearClient: NOOP_LINEAR_CLIENT,
     ...overrides,
   };
@@ -427,23 +418,4 @@ describe("runSpecPhase", () => {
     expect(failure.message).toMatch(/503/);
   });
 
-  it("ticket not found in DB: throws non-retryable SpecTicketNotFound", async () => {
-    const { client } = makeStubAgentClient([]);
-    const { run } = makeScriptedRunCommand([]);
-
-    await expect(
-      runSpecPhase(
-        { ticket: TICKET },
-        makeBaseDeps({
-          agentClient: client,
-          runCommand: run,
-          fetchTicket: async () => null,
-          resolveRepoPath: () => repoPath,
-        }),
-      ),
-    ).rejects.toMatchObject({
-      type: SPEC_FAILURE_TYPES.ticketNotFound,
-      nonRetryable: true,
-    });
-  });
 });

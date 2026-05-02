@@ -1,5 +1,9 @@
 # orchestration-substrate Specification
 
+## Purpose
+
+Defines the Temporal runtime substrate: client bootstrap, long-lived orchestrator worker registration, ephemeral container worker separation, local Temporal compose services, and smoke-workflow coverage.
+
 ## Requirements
 
 ### Requirement: Temporal client bootstrap is available to runtime code
@@ -20,7 +24,7 @@ The system SHALL expose a Temporal client factory in `server/src/temporal/client
 
 The system SHALL operate two distinct Temporal worker classes that share a single source tree but register disjoint subsets of workflows and activities:
 
-- **Orchestrator worker** (long-lived) — `server/src/temporal/worker.ts`. Registers all workflow modules (`linear-poller`, `per-ticket`, `hello`) and orchestrator-only activities (Linear, workflow-run persistence, `launchWorkerContainer`). Listens on the orchestrator task queue configured via `TEMPORAL_TASK_QUEUE`. One process per orchestrator deployment.
+- **Orchestrator worker** (long-lived) — `server/src/temporal/worker.ts`. Registers all workflow modules (`linear-poller`, `per-ticket`, `hello`) and orchestrator-only activities (Linear, ticket state sync, `launchWorkerContainer`). Listens on the orchestrator task queue configured via `TEMPORAL_TASK_QUEUE`. One process per orchestrator deployment.
 - **Container worker** (ephemeral) — `server/src/worker-entry.ts`. Registers only the phase activities (`runSpecPhase`, `runCoderPhase`, `runReviewPhase`). Listens on the per-repo task queue `repo-${WORKER_REPO}-worker`. One process per attempt; exits after one activity completes.
 
 Phase activity dispatch from workflow code MUST go through a helper (`server/src/temporal/dispatch.ts:phaseActivitiesForRepo`) that binds the activity proxy to `repo-${slug}-worker`, where the slug is derived from the workflow input's `targetRepoSlug`. Phase activities MUST NOT be registered on the orchestrator queue in production; tests MAY inject phase activities on the orchestrator worker for unit-grade coverage.

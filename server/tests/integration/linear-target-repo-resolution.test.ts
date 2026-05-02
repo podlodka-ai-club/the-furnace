@@ -1,8 +1,5 @@
 import { randomUUID } from "node:crypto";
 import net from "node:net";
-import os from "node:os";
-import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLinearClient } from "../../src/linear/client.js";
 import {
@@ -15,7 +12,7 @@ import { TEMPORAL_TASK_QUEUE } from "../../src/temporal/config.js";
 import { taskQueueForRepo } from "../../src/temporal/repo-slug.js";
 import { LINEAR_POLLER_WORKFLOW_NAME } from "../../src/temporal/workflows/linear-poller.js";
 import { buildPerTicketWorkflowId } from "../../src/temporal/workflows/per-ticket.js";
-import type { SpecPhaseInput } from "../../src/temporal/activities/phases.js";
+import type { CoderPhaseInput, SpecPhaseInput } from "../../src/temporal/activities/phases.js";
 import type {
   CoderPhaseOutput,
   ReviewerInput,
@@ -25,12 +22,6 @@ import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
-import type { RecordAttemptInput } from "../../src/temporal/activities/attempts.js";
-import {
-  persistWorkflowRunStart,
-  _getWorkflowRunsDb,
-  _resetWorkflowRunsDb,
-} from "../../src/temporal/activities/workflow-runs.js";
 
 const TEST_REPO_SLUG = "test-repo";
 const TEST_REGISTRY: ReadonlySet<string> = new Set([TEST_REPO_SLUG]);
@@ -123,7 +114,7 @@ function buildListActivity(): TemporalWorkerActivities["listAgentReadyTicketsAct
 
 function defaultPhaseActivities(): {
   runSpecPhase: (input: SpecPhaseInput) => Promise<SpecPhaseOutput>;
-  runCoderPhase: (input: SpecPhaseOutput) => Promise<CoderPhaseOutput>;
+  runCoderPhase: (input: CoderPhaseInput) => Promise<CoderPhaseOutput>;
   runReviewPhase: (input: ReviewerInput) => Promise<{
     verdict: "approve";
     reasoning: string;
@@ -141,8 +132,8 @@ function defaultPhaseActivities(): {
         },
       ],
     }),
-    runCoderPhase: async (input: SpecPhaseOutput): Promise<CoderPhaseOutput> => ({
-      featureBranch: input.featureBranch,
+    runCoderPhase: async (input: CoderPhaseInput): Promise<CoderPhaseOutput> => ({
+      featureBranch: input.specOutput.featureBranch,
       finalCommitSha: "c".repeat(40),
       diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
       testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
@@ -164,10 +155,11 @@ function buildOrchestratorActivities(opts: {
     helloActivity: async (n: string) => `hello, ${n}`,
     listAgentReadyTicketsActivity: buildListActivity(),
     syncLinearTicketStateActivity: async () => {},
-    persistWorkflowRunStart: async () => {},
-    persistWorkflowRunTransition: async () => {},
-    recordAttempt: async (_input: RecordAttemptInput) => {},
     validateRepoSlug: async () => {},
+    openPullRequestActivity: async () => ({
+      number: 1,
+      url: "https://github.test/example/pr/1",
+    }),
     launchWorkerContainer: async (
       input: LaunchWorkerContainerInput,
     ): Promise<LaunchWorkerContainerResult> => {
@@ -214,11 +206,6 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
       ),
     );
 
-    const dataDir = await mkdtemp(path.join(os.tmpdir(), "furnace-linear-rr-happy-"));
-    const originalDataDir = process.env.PGLITE_DATA_DIR;
-    process.env.PGLITE_DATA_DIR = dataDir;
-    _resetWorkflowRunsDb();
-
     const launchCalls: LaunchWorkerContainerInput[] = [];
     const phaseActivities = defaultPhaseActivities();
     const capturedSpecTickets: SpecPhaseInput["ticket"][] = [];
@@ -227,12 +214,7 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
       capturedSpecTickets.push(input.ticket);
       return baseRunSpecPhase(input);
     };
-    const activities: TemporalWorkerActivities = {
-      ...buildOrchestratorActivities({ phaseActivities, launchCalls }),
-      // Use the real persistWorkflowRunStart against a temp PGLite to verify
-      // the description lands in tickets.ac_text.
-      persistWorkflowRunStart,
-    };
+    const activities = buildOrchestratorActivities({ phaseActivities, launchCalls });
 
     const client = await createTemporalClient();
     const worker = await createTemporalWorker({ activities, taskQueue: orchTaskQueue });
@@ -241,58 +223,40 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
       activities: phaseActivities,
     });
 
-    try {
-      await worker.runUntil(async () => {
-        await repoWorker.runUntil(async () => {
-          const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
-            args: [],
-            taskQueue: orchTaskQueue,
-            workflowId: `poller-${randomUUID()}`,
-          });
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(LINEAR_POLLER_WORKFLOW_NAME, {
+          args: [],
+          taskQueue: orchTaskQueue,
+          workflowId: `poller-${randomUUID()}`,
+        });
 
-          const result = await handle.result();
-          expect(result.discovered).toBe(1);
-          expect(result.started).toBe(1);
-          expect(result.skipped).toBe(0);
+        const result = await handle.result();
+        expect(result.discovered).toBe(1);
+        expect(result.started).toBe(1);
+        expect(result.skipped).toBe(0);
 
-          // The poller starts the per-ticket child with parentClosePolicy=ABANDON
-          // and resolves once startChild ack returns — wait for the child to
-          // actually finish so launchWorkerContainer has been invoked per phase.
-          const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(issueNode.id));
-          await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+        // The poller starts the per-ticket child with parentClosePolicy=ABANDON
+        // and resolves once startChild ack returns — wait for the child to
+        // actually finish so launchWorkerContainer has been invoked per phase.
+        const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(issueNode.id));
+        await expect(ticketHandle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
         });
       });
+    });
 
-      const phases = launchCalls.map((c) => c.phase);
-      expect(phases).toEqual(["spec", "coder", "review"]);
-      for (const call of launchCalls) {
-        expect(call.repoSlug).toBe(TEST_REPO_SLUG);
-        expect(call.ticketId).toBe(issueNode.id);
-      }
-
-      // The per-ticket workflow received the stubbed Linear description.
-      expect(capturedSpecTickets).toHaveLength(1);
-      expect(capturedSpecTickets[0].description).toBe(stubbedDescription);
-
-      // The row written to tickets.ac_text contains the same value.
-      const db = await _getWorkflowRunsDb();
-      const rows = await db.query<{ ac_text: string }>(
-        "SELECT ac_text FROM tickets WHERE external_id = $1",
-        [issueNode.id],
-      );
-      expect(rows).toHaveLength(1);
-      expect(rows[0].ac_text).toBe(stubbedDescription);
-    } finally {
-      const db = await _getWorkflowRunsDb();
-      await db.close();
-      _resetWorkflowRunsDb();
-      if (originalDataDir === undefined) {
-        delete process.env.PGLITE_DATA_DIR;
-      } else {
-        process.env.PGLITE_DATA_DIR = originalDataDir;
-      }
-      await rm(dataDir, { recursive: true, force: true });
+    const phases = launchCalls.map((c) => c.phase);
+    expect(phases).toEqual(["spec", "coder", "review"]);
+    for (const call of launchCalls) {
+      expect(call.repoSlug).toBe(TEST_REPO_SLUG);
+      expect(call.ticketId).toBe(issueNode.id);
     }
+
+    // The per-ticket workflow received the stubbed Linear description.
+    expect(capturedSpecTickets).toHaveLength(1);
+    expect(capturedSpecTickets[0].description).toBe(stubbedDescription);
   }, 60_000);
 
   it("missing_repo_label: ticket is skipped, no workflow starts, log entry emitted", async () => {
@@ -533,7 +497,10 @@ describe("Linear → poller → per-ticket → launchWorkerContainer end-to-end"
           expect(result.skipped).toBe(0);
 
           const ticketHandle = client.workflow.getHandle(buildPerTicketWorkflowId(goodNode.id));
-          await expect(ticketHandle.result()).resolves.toEqual({ status: "succeeded" });
+          await expect(ticketHandle.result()).resolves.toEqual({
+            status: "succeeded",
+            pr: { number: 1, url: "https://github.test/example/pr/1" },
+          });
         });
       });
     } finally {

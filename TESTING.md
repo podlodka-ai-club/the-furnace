@@ -1,40 +1,57 @@
 # Testing
 
-## Quick reference
+## Default path
+
+For code changes, run the full suite from the repo root:
+
+```bash
+docker compose up -d temporal temporal-ui
+TEMPORAL_TASK_QUEUE=local-test npm test
+```
+
+`npm test` and `npm run test` are equivalent at the root. Both run `package.json`'s `test` script: the server Vitest suite first, then the root devcontainer build-script tests.
+
+Use `TEMPORAL_TASK_QUEUE=local-test` when a local app worker may already be running on the default `the-furnace` queue. Workflow tests create their own Temporal workers, so do not start `npm run --prefix server temporal:worker` just to run tests.
+
+Documentation-only changes do not need code tests when no runtime files changed; state that clearly in the final response.
+
+## Command matrix
 
 | Command | What it runs |
 |---|---|
-| `npm test` | Server unit + integration tests, then root devcontainer build-script tests (Vitest) |
-| `TEMPORAL_TASK_QUEUE=local-test npm test` | Same full suite, isolated from any already-running app worker on the default queue |
-| `cd server && npx vitest` | Watch mode from the server package |
-| `cd server && npx vitest run tests/integration` | Just integration tests |
-| `npm run build:devcontainer -- --repo <slug>` | Registry-backed devcontainer image build for one tracked repo |
-| `npm run test:devcontainer:e2e` | Local registry E2E for the demo devcontainer image |
-| `docker compose up -d temporal temporal-ui` | Starts local Temporal services for smoke workflow tests |
+| `docker compose up -d temporal temporal-ui` | Starts local Temporal services required by workflow tests and local orchestration |
+| `TEMPORAL_TASK_QUEUE=local-test npm test` | Default full verification for code changes; isolates test workflows from a running app worker |
+| `npm test` / `npm run test` | Same full suite without queue override; use only when no default-queue app worker is running |
+| `npm run --prefix server test` | Server Vitest suite once; includes server integration/workflow tests |
+| `npm run --prefix server test -- tests/integration/linear.test.ts` | One server test file |
+| `npm run --prefix server test:watch` | Server Vitest watch mode for active development; not final verification |
+| `npm run test:devcontainer` | Root devcontainer build-script tests only; already included in `npm test` |
+| `npm run test:devcontainer:e2e` | Manual Docker/local-registry E2E for devcontainer image builds |
+| `npm run test:container-as-worker:e2e` | Manual Docker + Temporal E2E for launch -> claim -> execute -> exit container-worker behavior |
 
 ## Tiers
 
 | Tier | Tool | Location | Notes |
 |---|---|---|---|
-| Unit | Vitest | `server/tests/*.test.ts`, `tests/*.test.ts` | Pure-function coverage, no I/O |
-| Integration | Vitest + Supertest | `server/tests/integration/*.test.ts` | Hits the Express app factory + PGLite directly |
-| Workflow | Temporal + Vitest | `server/tests/integration/temporal.*.test.ts` | Requires local Temporal services on `localhost:7233` |
+| Unit | Vitest | `server/tests/**/*.test.ts` outside `integration/`, plus `tests/*.test.ts` | Pure functions and small module contracts |
+| Server integration | Vitest + Supertest | `server/tests/integration/health.test.ts`, `server/tests/integration/errorHandler.test.ts`, `server/tests/integration/linear.test.ts` | Hits real app/client code with external APIs stubbed at the boundary |
+| Workflow integration | Temporal + Vitest | `server/tests/integration/temporal.*.test.ts`, `linear-target-repo-resolution.test.ts`, `container-lifecycle.test.ts` | Requires real Temporal on `localhost:7233`; tests create their own workers |
+| Manual E2E | Docker + Temporal + scripts | `npm run test:devcontainer:e2e`, `npm run test:container-as-worker:e2e` | Run when changing image build, launcher, or real container-worker lifecycle behavior |
 
-There is no end-to-end test tier — this project has no user-facing frontend. Human-visible behavior runs through Linear, GitHub, and Slack, all covered by integration tests that stub those APIs at the HTTP layer.
+There is no user-facing frontend E2E tier. Human-visible behavior runs through Linear, GitHub, and Slack, covered by integration tests that stub those APIs at the HTTP boundary.
 
-Workflow tests create their own Temporal workers. Do not start `npm run --prefix server temporal:worker` just to run tests. If the app worker is already running on the default `the-furnace` task queue, stop it or set `TEMPORAL_TASK_QUEUE` to a unique value for the test command; otherwise the app worker can consume test workflow tasks with production activities.
+## Temporal rules
 
-## Database strategy
+- Workflow tests must run against real Temporal, not mocks. Workflow run state lives there.
+- Start Temporal with `docker compose up -d temporal temporal-ui` before running the full suite if it is not already up.
+- Workflow tests create their own workers. Do not start `npm run --prefix server temporal:worker` just for tests.
+- If the app worker is already running on the default `the-furnace` task queue, stop it or run tests with a unique `TEMPORAL_TASK_QUEUE`.
 
-- **Dev and tests** use PGLite with a disposable data directory per test file (`data/pglite/<test-id>/`).
-- **Production** uses PostgreSQL via `$DATABASE_URL`.
-- All SQL is PostgreSQL-compatible; PGLite-only features are forbidden.
-- **Integration tests must hit PGLite, not mocks** — this is load-bearing per the concept: mock/prod divergence is exactly the failure class the architecture exists to eliminate.
+## Environment variables
 
-## Environment variables for isolation
-
-- `PGLITE_DATA_DIR` — override the default `data/pglite/` path during tests.
 - `TEMPORAL_TASK_QUEUE` — override default queue name (`the-furnace`) for isolated workflow runs.
+- `TEMPORAL_ADDRESS` — Temporal frontend address; defaults to `localhost:7233`.
+- `TEMPORAL_NAMESPACE` — Temporal namespace; defaults to `default`.
 - `TEMPORAL_LINEAR_POLLER_EVERY` — override linear poller schedule interval (default `1m`).
 - `LINEAR_API_KEY` — required for Linear client initialization.
 - `LINEAR_TEAM_ID` — required team context for Linear ticket queries/mutations.
@@ -45,8 +62,9 @@ Workflow tests create their own Temporal workers. Do not start `npm run --prefix
 - `DEVCONTAINER_REGISTRY_URL` — registry namespace for pre-warmed devcontainer images.
 - `DEVCONTAINER_REGISTRY_TOKEN` — registry write/pull token for devcontainer image builds.
 - `TARGET_REPO_GITHUB_TOKEN` — read-only GitHub token used to resolve refs and clone tracked target repos.
-- `CLAUDE_CODE_OAUTH_TOKEN` — optional Claude OAuth token for worker containers, generated via `claude setup-token`. Authenticates against the operator's Claude Pro/Max subscription. Put it in `server/.env` (already gitignored); the `dev`/`start`/`temporal:worker` npm scripts auto-load it via `tsx --env-file=.env` and the launcher forwards it into containers. Do NOT export the token in your shell unless you are running an integration runner that does not pass through `--env-file`.
-- `ANTHROPIC_API_KEY` — optional Claude API key for worker containers (metered API billing alternative to `CLAUDE_CODE_OAUTH_TOKEN`). Same `server/.env` flow; same shell-export caveat. Local integration tests under `server/tests/integration/` reuse the same `.env` flow when launching workers, regardless of which auth env var is in use.
+- `CLAUDE_CODE_OAUTH_TOKEN` — optional Claude OAuth token for worker containers, generated via `claude setup-token`. Put it in `server/.env`; the `dev`/`start`/`temporal:worker` npm scripts auto-load it via `tsx --env-file=.env`, and the launcher forwards it into containers.
+- `ANTHROPIC_API_KEY` — optional Claude API key for worker containers. Same `server/.env` flow as `CLAUDE_CODE_OAUTH_TOKEN`.
+- `CONTAINER_TEMPORAL_ADDRESS` — Temporal address passed to Docker-launched worker containers in container-worker E2E; on macOS/Windows Docker Desktop use `host.docker.internal:7233`.
 
 ## Adding a new test
 
@@ -57,6 +75,6 @@ Workflow tests create their own Temporal workers. Do not start `npm run --prefix
 
 ## What NOT to mock
 
-- PGLite (use a real ephemeral instance per test file).
-- The app factory (use it directly via Supertest).
-- Claude Agent SDK calls in agent-activity integration tests — use SDK replay fixtures if available, or skip those tests in CI rather than faking SDK responses.
+- Temporal for workflow tests.
+- The app factory; use it directly via Supertest.
+- Claude Agent SDK calls in agent-activity integration tests. Use SDK replay fixtures if available, or skip those tests in CI rather than faking SDK responses.

@@ -161,7 +161,7 @@ describe("Linear client integration", () => {
     });
   });
 
-  it("creates a typed sub-ticket with parent, label, and workflow link", async () => {
+  it("creates a typed sub-ticket with parent and workflow link", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_input, init) => {
       const body = parseBody(init);
       expect(body).toMatchObject({
@@ -170,11 +170,12 @@ describe("Linear client integration", () => {
           input: {
             teamId: "team_123",
             parentId: "parent_issue_id",
-            labelIds: ["ac-clarification"],
             title: "ac-clarification: Needs product clarification",
           },
         },
       });
+      const variables = (body as { variables: { input: Record<string, unknown> } }).variables.input;
+      expect(variables).not.toHaveProperty("labelIds");
 
       const description = (body as { variables: { input: { description: string } } }).variables.input
         .description;

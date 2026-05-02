@@ -14,8 +14,9 @@ import {
 
 const statAsync = promisify(stat);
 
-const fakeManifest = async (): Promise<{ imageRef: string }> => ({
+const fakeManifest = async (): Promise<{ imageRef: string; workspacePath: string }> => ({
   imageRef: "registry.example/test@sha256:abc",
+  workspacePath: "/workspaces/fake",
 });
 
 const baseInput: LaunchWorkerContainerInput = {
@@ -47,9 +48,20 @@ async function runLauncherCapturingArgs(
   return captured;
 }
 
-const credsMountPattern = /^type=bind,source=.+,target=\/root\/\.claude,readonly$/;
+const credsMountPattern = /^type=bind,source=.+,target=\/home\/node\/\.claude,readonly$/;
 
 describe("launchWorkerContainer docker args", () => {
+  it("runs the container as the non-root `node` user", async () => {
+    const args = await runLauncherCapturingArgs({
+      WORKER_BUNDLE_DIR: "/tmp/bundle",
+      CLAUDE_CREDS_DIR: "/tmp/creds",
+      BUILD_DIR: "/tmp/build",
+    });
+    const userIdx = args.indexOf("--user");
+    expect(userIdx).toBeGreaterThanOrEqual(0);
+    expect(args[userIdx + 1]).toBe("node");
+  });
+
   it("uses REPO_ROOT override for default build and bundle dirs", async () => {
     const repoRoot = await mkdtemp(path.join(os.tmpdir(), "furnace-repo-root-"));
     let capturedBuildDir = "";
@@ -62,7 +74,7 @@ describe("launchWorkerContainer docker args", () => {
       },
       loadManifest: async (_slug, buildDir) => {
         capturedBuildDir = buildDir;
-        return { imageRef: "registry.example/test@sha256:abc" };
+        return { imageRef: "registry.example/test@sha256:abc", workspacePath: "/workspaces/fake" };
       },
       runDocker: async (args) => {
         captured = args;
@@ -83,7 +95,7 @@ describe("launchWorkerContainer docker args", () => {
     await rm(repoRoot, { recursive: true, force: true });
   });
 
-  it("forwards ANTHROPIC_API_KEY env var alongside the credentials mount", async () => {
+  it("forwards ANTHROPIC_API_KEY and omits the credentials mount when set", async () => {
     const args = await runLauncherCapturingArgs({
       WORKER_BUNDLE_DIR: "/tmp/bundle",
       CLAUDE_CREDS_DIR: "/tmp/creds",
@@ -95,13 +107,10 @@ describe("launchWorkerContainer docker args", () => {
     expect(envPairs).toContain("ANTHROPIC_API_KEY=sk-test-123");
 
     const mountValues = collectMountValues(args);
-    expect(mountValues.some((v) => credsMountPattern.test(v))).toBe(true);
-    expect(mountValues).toContain(
-      "type=bind,source=/tmp/creds,target=/root/.claude,readonly",
-    );
+    expect(mountValues.some((v) => credsMountPattern.test(v))).toBe(false);
   });
 
-  it("forwards CLAUDE_CODE_OAUTH_TOKEN env var alongside the credentials mount", async () => {
+  it("forwards CLAUDE_CODE_OAUTH_TOKEN and omits the credentials mount when set", async () => {
     const args = await runLauncherCapturingArgs({
       WORKER_BUNDLE_DIR: "/tmp/bundle",
       CLAUDE_CREDS_DIR: "/tmp/creds",
@@ -114,9 +123,7 @@ describe("launchWorkerContainer docker args", () => {
     expect(envPairs.every((p) => !p.startsWith("ANTHROPIC_API_KEY"))).toBe(true);
 
     const mountValues = collectMountValues(args);
-    expect(mountValues).toContain(
-      "type=bind,source=/tmp/creds,target=/root/.claude,readonly",
-    );
+    expect(mountValues.some((v) => credsMountPattern.test(v))).toBe(false);
   });
 
   it("forwards both auth env vars when both are set", async () => {
@@ -154,7 +161,7 @@ describe("launchWorkerContainer docker args", () => {
 
     const mountValues = collectMountValues(args);
     expect(mountValues).toContain(
-      "type=bind,source=/tmp/creds,target=/root/.claude,readonly",
+      "type=bind,source=/tmp/creds,target=/home/node/.claude,readonly",
     );
   });
 
@@ -180,6 +187,34 @@ describe("launchWorkerContainer docker args", () => {
 
     const envPairs = collectEnvPairs(args);
     expect(envPairs.some((p) => p.startsWith("CLAUDE_CODE_OAUTH_TOKEN="))).toBe(false);
+  });
+
+  it("forwards LINEAR_API_KEY and LINEAR_TEAM_ID into the container", async () => {
+    const args = await runLauncherCapturingArgs({
+      WORKER_BUNDLE_DIR: "/tmp/bundle",
+      CLAUDE_CREDS_DIR: "/tmp/creds",
+      BUILD_DIR: "/tmp/build",
+      LINEAR_API_KEY: "lin_api_test",
+      LINEAR_TEAM_ID: "team-uuid",
+    });
+
+    const envPairs = collectEnvPairs(args);
+    expect(envPairs).toContain("LINEAR_API_KEY=lin_api_test");
+    expect(envPairs).toContain("LINEAR_TEAM_ID=team-uuid");
+  });
+
+  it("treats empty LINEAR_API_KEY and LINEAR_TEAM_ID as unset", async () => {
+    const args = await runLauncherCapturingArgs({
+      WORKER_BUNDLE_DIR: "/tmp/bundle",
+      CLAUDE_CREDS_DIR: "/tmp/creds",
+      BUILD_DIR: "/tmp/build",
+      LINEAR_API_KEY: "",
+      LINEAR_TEAM_ID: "",
+    });
+
+    const envPairs = collectEnvPairs(args);
+    expect(envPairs.some((p) => p.startsWith("LINEAR_API_KEY="))).toBe(false);
+    expect(envPairs.some((p) => p.startsWith("LINEAR_TEAM_ID="))).toBe(false);
   });
 });
 

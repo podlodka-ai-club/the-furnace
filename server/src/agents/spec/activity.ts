@@ -25,8 +25,8 @@ import {
   type GitOpsContext,
   type ProposedFile,
   type RunCommand,
-} from "./repo-ops.js";
-import { writeProposedFile } from "./repo-ops.js";
+} from "../shared/repo-ops.js";
+import { writeProposedFile } from "../shared/repo-ops.js";
 import {
   defaultSpecAgentClient,
 } from "./sdk-client.js";
@@ -53,7 +53,6 @@ export const SPEC_FAILURE_TYPES = {
   acClarificationRequested: "AcClarificationRequested",
   toolBudgetExhausted: "SpecAgentBudgetExhausted",
   testVerificationFailed: "SpecTestVerificationFailed",
-  ticketNotFound: "SpecTicketNotFound",
 } as const;
 
 export const specPhaseInputSchema = z.object({
@@ -71,14 +70,8 @@ export interface TicketRecord {
   description: string;
 }
 
-// FetchTicket returns just the DB-sourced fields (title, description). The
-// identifier and id come from the workflow input — the tickets table currently
-// does not store an `identifier` column.
-export type FetchTicket = (id: string) => Promise<{ title: string; description: string } | null>;
-
 export interface RunSpecPhaseDeps {
   agentClient?: SpecAgentClient;
-  fetchTicket?: FetchTicket;
   linearClient?: LinearClientApi;
   runCommand?: RunCommand;
   loadPrompt?: () => Promise<string>;
@@ -105,7 +98,6 @@ interface InternalContext {
   webBase: string;
   prompt: string;
   agentClient: SpecAgentClient;
-  fetchTicket: FetchTicket;
   linearClient: LinearClientApi;
   run: RunCommand;
 }
@@ -120,24 +112,16 @@ export async function runSpecPhase(
   const meta = (deps.resolveWorkflowMeta ?? defaultResolveWorkflowMeta)();
   const repoPath = (deps.resolveRepoPath ?? defaultResolveRepoPath)();
   const webBase = (deps.resolveWebBase ?? (() => TEMPORAL_WEB_BASE))();
-  const fetchTicket = deps.fetchTicket ?? defaultFetchTicket;
   const linearClient = deps.linearClient ?? createLinearClient();
   const agentClient = deps.agentClient ?? defaultSpecAgentClient;
   const run = deps.runCommand ?? defaultRunCommand;
   const loadPrompt = deps.loadPrompt ?? loadDefaultPrompt;
 
-  const dbTicket = await fetchTicket(validatedInput.ticket.id);
-  if (!dbTicket) {
-    throw ApplicationFailure.nonRetryable(
-      `Ticket ${validatedInput.ticket.id} not found in tickets table`,
-      SPEC_FAILURE_TYPES.ticketNotFound,
-    );
-  }
   const ticket: TicketRecord = {
     id: validatedInput.ticket.id,
     identifier: validatedInput.ticket.identifier,
-    title: dbTicket.title,
-    description: dbTicket.description,
+    title: validatedInput.ticket.title,
+    description: validatedInput.ticket.description,
   };
 
   const promptTemplate = await loadPrompt();
@@ -152,7 +136,6 @@ export async function runSpecPhase(
     webBase,
     prompt,
     agentClient,
-    fetchTicket,
     linearClient,
     run,
   };
@@ -392,16 +375,6 @@ function defaultResolveWorkflowMeta(): { workflowId: string; namespace: string; 
   } catch {
     return { workflowId: "<unknown>", namespace: "default", attempt: 1 };
   }
-}
-
-import { fetchTicketFromDb } from "../../db/tickets.js";
-
-async function defaultFetchTicket(id: string): Promise<{ title: string; description: string } | null> {
-  const row = await fetchTicketFromDb(id);
-  if (!row) {
-    return null;
-  }
-  return { title: row.title, description: row.description };
 }
 
 function heartbeat(detail: Record<string, unknown>): void {

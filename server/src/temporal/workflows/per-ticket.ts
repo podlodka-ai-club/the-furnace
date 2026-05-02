@@ -13,14 +13,16 @@ import type {
   ReviewerTicket,
   SpecPhaseOutput,
 } from "../../agents/contracts/index.js";
+import type * as githubActivities from "../activities/github.js";
 import type * as linearActivities from "../activities/linear.js";
-import type * as workflowRunActivities from "../activities/workflow-runs.js";
 import type * as workerLauncherActivities from "../activities/worker-launcher.js";
-import type * as attemptsActivities from "../activities/attempts.js";
 import type { LaunchWorkerContainerResult } from "../activities/worker-launcher.js";
-import { phaseActivitiesForRepo } from "../dispatch.js";
+import { PHASE_MAX_ATTEMPTS, phaseActivitiesForRepo } from "../dispatch.js";
+import { formatDiffSummary } from "../../github/trailers.js";
 
 const SPEC_AC_CLARIFICATION_FAILURE_TYPE = "AcClarificationRequested";
+const CODER_DEP_MISSING_FAILURE_TYPE = "DepMissingRequested";
+const CODER_DESIGN_QUESTION_FAILURE_TYPE = "DesignQuestionRequested";
 
 export const PER_TICKET_WORKFLOW_NAME = "perTicketWorkflow";
 
@@ -41,18 +43,12 @@ export interface PerTicketWorkflowInput {
 
 export interface PerTicketWorkflowResult {
   status: "succeeded" | "cancelled";
+  pr?: { number: number; url: string };
 }
 
 export const cancelSignal = defineSignal("cancel");
 export const currentPhaseQuery = defineQuery<PerTicketWorkflowPhase>("currentPhase");
 export const attemptCountQuery = defineQuery<number>("attemptCount");
-
-const {
-  persistWorkflowRunStart,
-  persistWorkflowRunTransition,
-} = proxyActivities<typeof workflowRunActivities>({
-  startToCloseTimeout: "1 minute",
-});
 
 const { syncLinearTicketStateActivity } = proxyActivities<typeof linearActivities>({
   startToCloseTimeout: "1 minute",
@@ -83,15 +79,12 @@ const { validateRepoSlug } = proxyActivities<typeof workerLauncherActivities>({
   },
 });
 
-// recordAttempt is registered ONLY on the orchestrator worker (PGLite is
-// in-process there). Per-repo container workers cannot reach it. See
-// `openspec/changes/spec-agent/design.md` §6 for the wiring rationale.
-const { recordAttempt } = proxyActivities<typeof attemptsActivities>({
-  startToCloseTimeout: "30 seconds",
+const { openPullRequestActivity } = proxyActivities<typeof githubActivities>({
+  startToCloseTimeout: "1 minute",
   retry: {
-    initialInterval: "1 second",
+    initialInterval: "2 seconds",
     backoffCoefficient: 2,
-    maximumInterval: "10 seconds",
+    maximumInterval: "30 seconds",
     maximumAttempts: 3,
   },
 });
@@ -128,10 +121,6 @@ export async function perTicketWorkflow(
     input.targetRepoSlug,
   );
 
-  await persistWorkflowRunStart({
-    workflowId: workflowInfo().workflowId,
-    ticket: input.ticket,
-  });
   await syncLinearTicketStateActivity({
     ticketId: input.ticket.id,
     stateName: "In Progress",
@@ -142,10 +131,40 @@ export async function perTicketWorkflow(
     return { status: "cancelled" };
   }
 
-  const coderOutput = await runPhase("coder", () => runCoderPhase(specOutput));
+  // Stuck-failures (DepMissingRequested, DesignQuestionRequested) propagate
+  // out of runPhase without retrying. The workflow does NOT sync the Linear
+  // ticket to "Canceled" — it stays "In Progress" so a human can resolve the
+  // sub-ticket and the orchestrator re-enqueues from `agent-ready`. The
+  // structured failure detail (`subTicketRef`) is preserved in Temporal's
+  // workflow event history via the rethrown ApplicationFailure.
+  const coderOutput: CoderPhaseOutput | null = await runPhase(
+    "coder",
+    () => runCoderPhase({ ticket: input.ticket, specOutput }),
+    {
+      stuckFailureTypes: [
+        CODER_DEP_MISSING_FAILURE_TYPE,
+        CODER_DESIGN_QUESTION_FAILURE_TYPE,
+      ],
+    },
+  );
   if (coderOutput === null) {
     return { status: "cancelled" };
   }
+
+  // TODO(review-agent): once review-agent lands, move this PR-open call onto
+  // the review approve path and gate it on `reviewOutput.verdict === "approve"`.
+  // The runReviewPhase no-op is intentionally left in place below so the
+  // workflow shape (spec → coder → review → completed) and the currentPhase
+  // query semantics survive until that change ships.
+  const pr = await openPullRequestActivity({
+    featureBranch: coderOutput.featureBranch,
+    targetRepoSlug: input.targetRepoSlug,
+    ticket: input.ticket,
+    workflowId: workflowInfo().workflowId,
+    attemptCount,
+    finalCommitSha: coderOutput.finalCommitSha,
+    diffSummary: formatDiffSummary(coderOutput.diffStat),
+  });
 
   const reviewerInput: ReviewerInput = {
     ...coderOutput,
@@ -161,121 +180,69 @@ export async function perTicketWorkflow(
     ticketId: input.ticket.id,
     stateName: "Done",
   });
-  await persistWorkflowRunTransition({
-    workflowId: workflowInfo().workflowId,
-    status: "succeeded",
-  });
-  return { status: "succeeded" };
+  return { status: "succeeded", pr };
 
   async function runSpecPhaseWithRecording(): Promise<SpecPhaseOutput | null> {
-    if (cancelled) {
-      await transitionToCancelled();
-      return null;
-    }
-
-    currentPhase = "spec";
-    attemptCount += 1;
-    const attemptIndex = attemptCount - 1;
-    await persistWorkflowRunTransition({
-      workflowId: workflowInfo().workflowId,
-      status: "running",
+    return await runPhase("spec", () => runSpecPhase({ ticket: input.ticket }), {
+      stuckFailureTypes: [SPEC_AC_CLARIFICATION_FAILURE_TYPE],
     });
-
-    const launch: LaunchWorkerContainerResult = await launchWorkerContainer({
-      ticketId: input.ticket.id,
-      phase: "spec",
-      attemptId: `${workflowInfo().workflowId}:spec:${attemptCount}`,
-      repoSlug: input.targetRepoSlug,
-    });
-    void launch;
-
-    await recordAttempt({
-      workflowId: workflowInfo().workflowId,
-      phase: "spec",
-      attemptIndex,
-      outcome: "pending",
-    });
-
-    let output: SpecPhaseOutput;
-    try {
-      output = await runSpecPhase({ ticket: input.ticket });
-    } catch (err) {
-      if (isAcClarificationFailure(err)) {
-        await recordAttempt({
-          workflowId: workflowInfo().workflowId,
-          phase: "spec",
-          attemptIndex,
-          outcome: "stuck",
-        });
-        // Persist run as failed; the structured failure detail (subTicketRef)
-        // is preserved in Temporal's workflow event history via the rethrown
-        // ApplicationFailure. We deliberately do NOT sync the Linear ticket
-        // to "Canceled" — it must remain "In Progress" so a human can
-        // resolve the clarification.
-        await persistWorkflowRunTransition({
-          workflowId: workflowInfo().workflowId,
-          status: "failed",
-        });
-        throw err;
-      }
-      await recordAttempt({
-        workflowId: workflowInfo().workflowId,
-        phase: "spec",
-        attemptIndex,
-        outcome: "failed",
-      });
-      throw err;
-    }
-
-    // Match the original phase-cancel timing: check cancel immediately after
-    // the gated activity returns and before any further activity dispatches.
-    // If we're cancelled, leave the attempts row at `pending` and tear down.
-    if (cancelled) {
-      await transitionToCancelled();
-      return null;
-    }
-
-    await recordAttempt({
-      workflowId: workflowInfo().workflowId,
-      phase: "spec",
-      attemptIndex,
-      outcome: "passed",
-    });
-
-    return output;
   }
 
-  async function runPhase<T>(phase: "spec" | "coder" | "review", fn: () => Promise<T>): Promise<T | null> {
-    if (cancelled) {
-      await transitionToCancelled();
-      return null;
+  // Per concept §3.6, every retry of a phase activity must run in a fresh
+  // container. The per-attempt container worker shuts down after a single
+  // activity settles (see worker-entry.ts > singleTaskActivity), so
+  // activity-level retries would re-queue onto a dead worker. Retry
+  // orchestration therefore lives here: each loop iteration launches a fresh
+  // container and dispatches the phase activity once.
+  //
+  // Failures whose `ApplicationFailure.type` is in `stuckFailureTypes` skip
+  // the retry loop and propagate up so the workflow can convert them into
+  // Linear sub-tickets without spending retry budget.
+  async function runPhase<T>(
+    phase: "spec" | "coder" | "review",
+    fn: () => Promise<T>,
+    options: { stuckFailureTypes?: readonly string[] } = {},
+  ): Promise<T | null> {
+    const stuckTypes = options.stuckFailureTypes ?? [];
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= PHASE_MAX_ATTEMPTS; attempt += 1) {
+      if (cancelled) {
+        await transitionToCancelled();
+        return null;
+      }
+
+      currentPhase = phase;
+      attemptCount += 1;
+
+      const launch: LaunchWorkerContainerResult = await launchWorkerContainer({
+        ticketId: input.ticket.id,
+        phase,
+        attemptId: `${workflowInfo().workflowId}:${phase}:${attemptCount}`,
+        repoSlug: input.targetRepoSlug,
+      });
+      void launch;
+
+      try {
+        const output = await fn();
+
+        if (cancelled) {
+          await transitionToCancelled();
+          return null;
+        }
+
+        return output;
+      } catch (err) {
+        if (stuckTypes.some((t) => matchFailureType(err, t))) {
+          throw err;
+        }
+        if (isNonRetryableFailure(err)) {
+          throw err;
+        }
+        lastError = err;
+        // Loop body re-launches a fresh container on the next iteration.
+      }
     }
-
-    currentPhase = phase;
-    attemptCount += 1;
-    await persistWorkflowRunTransition({
-      workflowId: workflowInfo().workflowId,
-      status: "running",
-    });
-
-    // Each phase invocation (including Temporal-driven retries of this code path)
-    // launches a fresh container per the single-task lifetime contract.
-    const launch: LaunchWorkerContainerResult = await launchWorkerContainer({
-      ticketId: input.ticket.id,
-      phase,
-      attemptId: `${workflowInfo().workflowId}:${phase}:${attemptCount}`,
-      repoSlug: input.targetRepoSlug,
-    });
-    void launch;
-
-    const output = await fn();
-
-    if (cancelled) {
-      await transitionToCancelled();
-      return null;
-    }
-
-    return output;
+    throw lastError;
   }
 
   async function transitionToCancelled(): Promise<void> {
@@ -283,10 +250,6 @@ export async function perTicketWorkflow(
     await syncLinearTicketStateActivity({
       ticketId: input.ticket.id,
       stateName: "Canceled",
-    });
-    await persistWorkflowRunTransition({
-      workflowId: workflowInfo().workflowId,
-      status: "cancelled",
     });
   }
 }
@@ -300,13 +263,31 @@ export function buildPerTicketWorkflowId(ticketId: string): string {
 // `ApplicationFailure`. We also accept a bare `ApplicationFailure` for
 // completeness (e.g. when the failure originates from inside a child workflow
 // or is rethrown manually).
-function isAcClarificationFailure(err: unknown): boolean {
-  if (err instanceof ApplicationFailure && err.type === SPEC_AC_CLARIFICATION_FAILURE_TYPE) {
+// An activity that throws `ApplicationFailure.nonRetryable(...)` surfaces in
+// the workflow as `ActivityFailure` with `cause` set to the non-retryable
+// `ApplicationFailure`. The workflow-level retry loop must honor that flag —
+// otherwise we'd re-launch a container only to repeat a failure the activity
+// has already declared terminal.
+function isNonRetryableFailure(err: unknown): boolean {
+  if (err instanceof ApplicationFailure) {
+    return err.nonRetryable === true;
+  }
+  if (err instanceof ActivityFailure) {
+    const cause = err.cause;
+    if (cause instanceof ApplicationFailure) {
+      return cause.nonRetryable === true;
+    }
+  }
+  return false;
+}
+
+function matchFailureType(err: unknown, type: string): boolean {
+  if (err instanceof ApplicationFailure && err.type === type) {
     return true;
   }
   if (err instanceof ActivityFailure) {
     const cause = err.cause;
-    if (cause instanceof ApplicationFailure && cause.type === SPEC_AC_CLARIFICATION_FAILURE_TYPE) {
+    if (cause instanceof ApplicationFailure && cause.type === type) {
       return true;
     }
   }

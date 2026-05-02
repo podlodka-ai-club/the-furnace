@@ -7,7 +7,6 @@ import { Connection, WorkflowClient } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import * as helloActivities from "../src/temporal/activities/hello.js";
 import * as linearActivities from "../src/temporal/activities/linear.js";
-import * as workflowRunActivities from "../src/temporal/activities/workflow-runs.js";
 import {
   launchWorkerContainer as launchWorkerContainerImpl,
   type LaunchWorkerContainerInput,
@@ -79,11 +78,8 @@ async function run(): Promise<void> {
   const orchestratorActivities = {
     ...helloActivities,
     ...linearActivities,
-    ...workflowRunActivities,
     syncLinearTicketStateActivity: async () => {},
     listAgentReadyTicketsActivity: async () => [],
-    persistWorkflowRunStart: async () => {},
-    persistWorkflowRunTransition: async () => {},
     validateRepoSlug: async ({ slug }: { slug: string }): Promise<void> => {
       if (slug !== options.repoSlug) {
         throw new Error(`E2E expected slug '${options.repoSlug}', got '${slug}'`);

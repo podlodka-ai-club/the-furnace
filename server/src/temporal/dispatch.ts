@@ -8,6 +8,13 @@ export type PhaseActivities = Pick<
   "runSpecPhase" | "runCoderPhase" | "runReviewPhase"
 >;
 
+// Phase activities run inside ephemeral per-attempt containers whose worker
+// shuts down after a single activity settles (see worker-entry.ts'
+// `singleTaskActivity`). Activity-level retries would re-queue the next
+// attempt onto a queue with no live worker. Retry orchestration therefore
+// lives at the workflow level (`runPhase` in `workflows/per-ticket.ts`),
+// which re-launches a container for each attempt — preserving the
+// "fresh container per retry" guarantee from concept §3.6.
 export const PHASE_ACTIVITY_DEFAULTS: ActivityOptions = {
   startToCloseTimeout: "10 minutes",
   scheduleToStartTimeout: "5 minutes",
@@ -16,9 +23,14 @@ export const PHASE_ACTIVITY_DEFAULTS: ActivityOptions = {
     initialInterval: "5 seconds",
     backoffCoefficient: 2,
     maximumInterval: "1 minute",
-    maximumAttempts: 3,
+    maximumAttempts: 1,
   },
 };
+
+// Maximum retries (including the first attempt) the workflow's `runPhase`
+// will run for a phase activity that fails with a retryable failure.
+// Each attempt launches a fresh container.
+export const PHASE_MAX_ATTEMPTS = 3;
 
 export interface PhaseActivitiesForRepoOptions {
   overrides?: Partial<ActivityOptions>;

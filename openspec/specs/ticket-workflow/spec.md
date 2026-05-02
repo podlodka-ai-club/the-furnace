@@ -15,12 +15,12 @@ The ticket workflow SHALL type phase activity interfaces with canonical contract
 
 ### Requirement: No-op Phase Implementations Return Valid Contract Shapes
 
-Coder and review phase implementations that remain as no-op stubs SHALL return placeholder payloads that conform to their corresponding contract schemas. The spec phase no longer falls under this requirement because it has a real implementation.
+Review phase implementations that remain as no-op stubs SHALL return placeholder payloads that conform to the `ReviewResult` contract schema. The spec and coder phases no longer fall under this requirement because they have real implementations.
 
 #### Scenario: Placeholder outputs satisfy contract validation
 
-- **WHEN** the no-op coder or review phase activities execute in the workflow
-- **THEN** each phase output MUST pass its output `schema.parse()` check without schema errors
+- **WHEN** the no-op review phase activity executes in the workflow
+- **THEN** the phase output MUST pass `reviewResultSchema.parse()` without schema errors
 
 ### Requirement: Poller Workflow Enqueues One Ticket Workflow Per Agent-Ready Todo Ticket
 The system SHALL run a cron-based `LinearPollerWorkflow` that polls Linear for `agent-ready` tickets in `Todo` state and starts a `PerTicketWorkflow` for each discovered ticket using ticket-ID-based idempotency.
@@ -37,7 +37,7 @@ The system SHALL run a cron-based `LinearPollerWorkflow` that polls Linear for `
 
 ### Requirement: Per-Ticket Workflow Runs Three Ordered Phases
 
-The system SHALL execute `PerTicketWorkflow` with three phase activities in strict order: `runSpecPhase`, then `runCoderPhase`, then `runReviewPhase`. The spec phase SHALL be a real activity that produces a feature branch and failing-test commits, while coder and review phases remain no-op stubs until their own changes land.
+The system SHALL execute `PerTicketWorkflow` with three phase activities in strict order: `runSpecPhase`, then `runCoderPhase`, then `runReviewPhase`. The spec and coder phases SHALL each be a real activity — the spec phase produces a feature branch with failing-test commits and the coder phase makes those tests green on the same feature branch — while the review phase remains a no-op stub until its own change lands.
 
 #### Scenario: Ticket workflow advances through all phases
 
@@ -45,37 +45,18 @@ The system SHALL execute `PerTicketWorkflow` with three phase activities in stri
 - **THEN** it MUST invoke `runSpecPhase` before `runCoderPhase`
 - **AND** it MUST invoke `runCoderPhase` before `runReviewPhase`
 - **AND** the spec phase MUST execute the real Claude-Agent-SDK-driven activity body, not a no-op
-- **AND** the coder and review phases MAY remain no-op stubs that log and return contract-shaped placeholders
-
-### Requirement: Workflow Records Attempts Row Around Spec Phase
-
-The workflow SHALL invoke a `recordAttempt` orchestrator-side activity around every spec phase execution so that one `attempts` row is persisted per invocation, regardless of whether the phase succeeded, requested clarification, or threw an internal error.
-
-#### Scenario: Spec phase succeeds
-
-- **WHEN** the spec phase returns a valid `SpecPhaseOutput`
-- **THEN** the workflow MUST record an `attempts` row with `outcome = 'passed'`, the workflow's run id, `phase = 'spec'`, and the current attempt index
-
-#### Scenario: Spec phase requests AC clarification
-
-- **WHEN** the spec phase throws an `AcClarificationRequested` non-retryable failure
-- **THEN** the workflow MUST record an `attempts` row with `outcome = 'stuck'`
-- **AND** the row MUST be written before the workflow transitions to its terminal state
-
-#### Scenario: Spec phase throws internal error
-
-- **WHEN** the spec phase throws any other failure (after Temporal retries are exhausted or for a non-retryable reason other than clarification)
-- **THEN** the workflow MUST record an `attempts` row with `outcome = 'failed'`
+- **AND** the coder phase MUST execute the real Claude-Agent-SDK-driven activity body, not a no-op
+- **AND** the review phase MAY remain a no-op stub that logs and returns a contract-shaped placeholder
 
 ### Requirement: AC Clarification Failure Pauses Workflow Pending Human
 
-The workflow SHALL recognize `AcClarificationRequested` non-retryable failures from the spec phase as a structured human-pause signal, persist the run as `failed` with the structured failure detail describing the sub-ticket, and SHALL NOT advance to the coder phase.
+The workflow SHALL recognize `AcClarificationRequested` non-retryable failures from the spec phase as a structured human-pause signal, surface the sub-ticket detail in Temporal failure metadata, and SHALL NOT advance to the coder phase.
 
 #### Scenario: Clarification path detected
 
 - **WHEN** the spec phase throws an `AcClarificationRequested` failure carrying a sub-ticket reference
 - **THEN** the workflow MUST catch the failure and stop before invoking `runCoderPhase`
-- **AND** the workflow MUST update the persisted `workflow_runs` row with `status = 'failed'` and a structured failure detail that includes the sub-ticket `{ id, identifier, title }`
+- **AND** the workflow failure detail MUST include the sub-ticket `{ id, identifier, title }`
 - **AND** the corresponding Linear ticket MUST remain in its `In Progress` state (the workflow MUST NOT cancel it)
 
 #### Scenario: Other failures bubble normally
@@ -90,7 +71,7 @@ The system SHALL expose a `cancel` signal on `PerTicketWorkflow` that causes the
 #### Scenario: Cancel arrives during execution
 - **WHEN** `cancel` is signaled to a running `PerTicketWorkflow`
 - **THEN** the workflow MUST stop before starting any remaining phases
-- **AND** it MUST record cancellation in workflow state and persisted run status
+- **AND** it MUST record cancellation in workflow state so Temporal surfaces the cancelled terminal status
 
 ### Requirement: Per-Ticket Workflow Exposes Phase and Attempt Queries
 The system SHALL expose Temporal query handlers on `PerTicketWorkflow` for `currentPhase` and `attemptCount`.
@@ -99,10 +80,87 @@ The system SHALL expose Temporal query handlers on `PerTicketWorkflow` for `curr
 - **WHEN** an operator queries `currentPhase` or `attemptCount` for a running or completed `PerTicketWorkflow`
 - **THEN** the workflow MUST return the latest in-memory state for phase position and retry attempt count
 
-### Requirement: Workflow Runs Are Persisted On Start and Phase Transitions
-The system SHALL write a `workflow_runs` record when `PerTicketWorkflow` starts and SHALL update that record on each phase transition.
+### Requirement: Coder Phase Receives Ticket And Spec Output
 
-#### Scenario: Persistent status tracks lifecycle
-- **WHEN** a `PerTicketWorkflow` begins and advances from spec to coder to review
-- **THEN** persistence MUST contain a run row created at start
-- **AND** that row MUST be updated at each phase transition with the current phase/status metadata
+The workflow SHALL invoke `runCoderPhase` with an input that includes both the original ticket (so the prompt can reference its title and description) and the `SpecPhaseOutput` produced by the spec phase (so the activity can check out the feature branch and read the test paths).
+
+#### Scenario: Workflow passes ticket and spec output
+
+- **WHEN** the workflow advances from the spec phase to the coder phase
+- **THEN** it MUST call `runCoderPhase({ ticket, specOutput })` where `ticket` is the workflow's input ticket and `specOutput` is the value returned by `runSpecPhase`
+
+### Requirement: Coder Stuck Failures Pause Workflow Pending Human
+
+The workflow SHALL recognize `DepMissingRequested` and `DesignQuestionRequested` non-retryable failures from the coder phase as structured human-pause signals, surface the sub-ticket detail in Temporal failure metadata, and SHALL NOT advance to the review phase.
+
+#### Scenario: Dep-missing path detected
+
+- **WHEN** the coder phase throws a `DepMissingRequested` failure carrying a sub-ticket reference
+- **THEN** the workflow MUST catch the failure and stop before invoking `runReviewPhase`
+- **AND** the workflow failure detail MUST include the sub-ticket `{ id, identifier, title }`
+- **AND** the corresponding Linear ticket MUST remain in its `In Progress` state (the workflow MUST NOT cancel it)
+
+#### Scenario: Design-question path detected
+
+- **WHEN** the coder phase throws a `DesignQuestionRequested` failure carrying a sub-ticket reference
+- **THEN** the workflow MUST catch the failure and stop before invoking `runReviewPhase`
+- **AND** the workflow failure detail MUST include the sub-ticket `{ id, identifier, title }`
+- **AND** the corresponding Linear ticket MUST remain in its `In Progress` state (the workflow MUST NOT cancel it)
+
+#### Scenario: Other coder failures bubble normally
+
+- **WHEN** the coder phase throws any failure other than `DepMissingRequested` or `DesignQuestionRequested`
+- **THEN** the workflow MUST surface it via Temporal's normal retry and failure semantics
+- **AND** the workflow MUST NOT treat it as a human-pause state
+
+### Requirement: Cancel Signal Aborts Before Coder Phase Dispatch
+
+The workflow's existing `cancel` signal SHALL stop the workflow before the coder phase is invoked when cancellation arrives during or after the spec phase, preserving the per-attempt ephemerality contract.
+
+#### Scenario: Cancel arrives between spec and coder
+
+- **WHEN** the spec phase has returned and `cancel` has been signaled
+- **THEN** the workflow MUST NOT invoke `runCoderPhase`
+- **AND** the workflow MUST transition to the cancelled terminal state
+
+#### Scenario: Cancel arrives during coder phase
+
+- **WHEN** `cancel` is signaled while the coder phase activity is in flight
+- **THEN** the workflow MUST stop before invoking `runReviewPhase` once the coder phase resolves or is cancelled
+- **AND** the workflow MUST transition to the cancelled terminal state
+
+### Requirement: Workflow Opens Pull Request After Coder Green
+
+After `runCoderPhase` returns successfully, the workflow SHALL invoke `openPullRequestActivity` with the coder phase's `featureBranch`, the workflow's `targetRepoSlug`, the workflow's input `ticket`, the workflow id, the current attempt count, the coder phase's `finalCommitSha`, and a one-line `diffSummary` derived from the coder phase's `diffStat`. The call SHALL occur before the existing no-op `runReviewPhase` call so the workflow shape `spec → coder → review → completed` survives.
+
+The call site SHALL carry a `TODO(review-agent)` comment indicating the PR-open call will move onto the review approve path (gated on `reviewOutput.verdict === "approve"`) once the `review-agent` change lands.
+
+#### Scenario: Coder green path opens PR before review stub
+
+- **WHEN** `runCoderPhase` returns successfully
+- **THEN** the workflow MUST invoke `openPullRequestActivity` with the coder phase output, ticket, workflow id, and attempt count
+- **AND** the workflow MUST invoke the activity before the existing no-op `runReviewPhase` call
+
+#### Scenario: PR open is skipped when coder phase does not return green
+
+- **WHEN** `runCoderPhase` throws (including human-pause failures such as `DepMissingRequested` or `DesignQuestionRequested`)
+- **THEN** the workflow MUST NOT invoke `openPullRequestActivity`
+
+#### Scenario: Splice point is marked for review-agent
+
+- **WHEN** the source for `PerTicketWorkflow` is inspected
+- **THEN** the `openPullRequestActivity` call site MUST be annotated with a `TODO(review-agent)` comment describing the future move to the review approve path
+
+### Requirement: Per-Ticket Workflow Result Includes PR Reference On Success
+
+The `PerTicketWorkflow` result SHALL include an optional `pr` field of shape `{ number: number; url: string }`. The field SHALL be present when the workflow status is `succeeded` and SHALL be absent when the status is `cancelled` or when the workflow ends due to a human-pause failure.
+
+#### Scenario: Successful workflow returns PR reference
+
+- **WHEN** a `PerTicketWorkflow` completes with `status: "succeeded"`
+- **THEN** the workflow result MUST include a `pr` object containing `number` and `url` from the `openPullRequestActivity` result
+
+#### Scenario: Cancelled workflow omits PR reference
+
+- **WHEN** a `PerTicketWorkflow` completes with `status: "cancelled"`
+- **THEN** the workflow result MUST NOT include a `pr` field

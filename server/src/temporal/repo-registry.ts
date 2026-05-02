@@ -18,12 +18,18 @@ export interface RepoSlugRegistryEntry {
   slug: string;
   languages?: string[];
   tools?: string[];
+  owner?: string;
+  name?: string;
+  ref?: string;
 }
 
 interface RawRepoEntry {
   slug?: unknown;
   languages?: unknown;
   tools?: unknown;
+  owner?: unknown;
+  name?: unknown;
+  ref?: unknown;
 }
 
 function defaultReposPath(repoRoot: string): string {
@@ -60,7 +66,10 @@ function normalizeRegistryEntry(entry: unknown): RepoSlugRegistryEntry {
   const tools = Array.isArray(raw.tools)
     ? raw.tools.filter((v): v is string => typeof v === "string")
     : undefined;
-  return { slug: raw.slug, languages, tools };
+  const owner = typeof raw.owner === "string" && raw.owner.length > 0 ? raw.owner : undefined;
+  const name = typeof raw.name === "string" && raw.name.length > 0 ? raw.name : undefined;
+  const ref = typeof raw.ref === "string" && raw.ref.length > 0 ? raw.ref : undefined;
+  return { slug: raw.slug, languages, tools, owner, name, ref };
 }
 
 export function assertRepoSlug(value: string, registry: RepoSlugRegistryEntry[]): RepoSlug {

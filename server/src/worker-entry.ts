@@ -33,10 +33,16 @@ export function singleTaskActivity<F extends ActivityFn>(
       // Schedule shutdown on the next tick so Temporal ships the activity result
       // before the worker stops accepting tasks. maxConcurrentActivityTaskExecutions=1
       // prevents a second task from being claimed during the shutdown window.
+      // Wrap in try so a SIGTERM-driven shutdown that already moved the worker
+      // into DRAINING doesn't surface as an uncaughtException here — Temporal
+      // throws IllegalStateError synchronously in that case.
       setImmediate(() => {
         const worker = getWorker();
-        if (worker) {
+        if (!worker) return;
+        try {
           void Promise.resolve(worker.shutdown()).catch(() => {});
+        } catch {
+          // worker already shutting down — nothing more to do.
         }
       });
     }

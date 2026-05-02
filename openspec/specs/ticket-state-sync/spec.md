@@ -1,5 +1,9 @@
 # ticket-state-sync Specification
 
+## Purpose
+
+Defines how per-ticket workflow lifecycle transitions synchronize the corresponding Linear issue state through retry-safe Temporal activity boundaries.
+
 ## Requirements
 
 ### Requirement: Workflow lifecycle updates Linear ticket state

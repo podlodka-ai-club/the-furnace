@@ -32,7 +32,7 @@
 ## Phase 4: Agent pipeline (MVP)
 
 - [x] `spec-agent` — Linear ticket → failing tests inside the container; opens a typed `ac-clarification` sub-ticket when AC is ambiguous
-- [ ] `coder-agent` — Claude Agent SDK loop targeting green tests; files typed `dep-missing` / `design-question` sub-tickets when stuck
+- [x] `coder-agent` — Claude Agent SDK loop targeting green tests; files typed `dep-missing` / `design-question` sub-tickets when stuck
 - [ ] `review-agent` — Single reviewer activity with one verdict and reasoning payload over the coder diff
 - [ ] `github-adapter` — Open PR after review passes; attach structured workflow trailers for traceability
 
@@ -53,5 +53,7 @@
 ## Phase 7: Chores
 
 - [ ] `server-unused` — Project was created from classic web-api templates, therefore have server runned by server/index.ts that is only launching migrations and hosts /health endpoint. We should probably get rid of it
+
+- [x] `pglite-drop` — Dropped DB layer entirely; workflow run state lives in Temporal (see `drop-orchestrator-db` change).
 
 > **Milestone:** Advanced governance complete — multi-persona review, split-vote escalation, and Slack-driven veto signaling.

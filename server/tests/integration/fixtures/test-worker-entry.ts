@@ -38,9 +38,17 @@ async function slowSpecPhase(input: TestSpecInput): Promise<unknown> {
   };
 }
 
-async function fastCoderPhase(input: { featureBranch: string }): Promise<unknown> {
+// Coder phase input shape evolved (now `{ ticket, specOutput }`); accept both
+// shapes so this fixture works with the historical and current activity sigs.
+async function fastCoderPhase(input: {
+  ticket?: unknown;
+  specOutput?: { featureBranch?: string };
+  featureBranch?: string;
+}): Promise<unknown> {
+  const featureBranch =
+    input.specOutput?.featureBranch ?? input.featureBranch ?? "agent/spec-unknown";
   return {
-    featureBranch: input.featureBranch,
+    featureBranch,
     finalCommitSha: "c".repeat(40),
     diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
     testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },

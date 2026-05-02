@@ -1,22 +1,23 @@
 import { Context } from "@temporalio/activity";
 import {
-  type CoderPhaseOutput,
   type ReviewResult,
   type ReviewerInput,
-  type SpecPhaseOutput,
-  coderPhaseOutputSchema,
   reviewResultSchema,
   reviewerInputSchema,
-  specPhaseOutputSchema,
 } from "../../agents/contracts/index.js";
 import {
   runSpecPhase as runSpecPhaseImpl,
   specPhaseInputSchema,
 } from "../../agents/spec/activity.js";
 import type { SpecPhaseInput } from "../../agents/spec/activity.js";
+import {
+  runCoderPhase as runCoderPhaseImpl,
+  coderPhaseInputSchema,
+} from "../../agents/coder/activity.js";
+import type { CoderPhaseInput } from "../../agents/coder/activity.js";
 
-export { specPhaseInputSchema };
-export type { SpecPhaseInput };
+export { specPhaseInputSchema, coderPhaseInputSchema };
+export type { SpecPhaseInput, CoderPhaseInput };
 
 // Heartbeat once at the start of each no-op phase so the activity body is on
 // record with Temporal as a heartbeat-emitting activity. Real phase bodies
@@ -36,29 +37,10 @@ function heartbeatStart(detail: Record<string, unknown>): void {
 // so the worker registry / dispatch wiring keeps importing from the same path.
 export const runSpecPhase = runSpecPhaseImpl;
 
-export async function runCoderPhase(input: SpecPhaseOutput): Promise<CoderPhaseOutput> {
-  const validatedInput = specPhaseOutputSchema.parse(input);
-  heartbeatStart({ phase: "coder", featureBranch: validatedInput.featureBranch });
-  console.info("runCoderPhase noop", { featureBranch: validatedInput.featureBranch });
-
-  const output = {
-    featureBranch: validatedInput.featureBranch,
-    finalCommitSha: "b".repeat(40),
-    diffStat: {
-      filesChanged: 1,
-      insertions: 10,
-      deletions: 0,
-    },
-    testRunSummary: {
-      total: 1,
-      passed: 1,
-      failed: 0,
-      durationMs: 1000,
-    },
-  };
-
-  return coderPhaseOutputSchema.parse(output);
-}
+// Real coder activity body lives in `agents/coder/activity.ts`. Re-exported
+// here so the worker registry sees `runCoderPhase` from the same module as
+// the other phase activities.
+export const runCoderPhase = runCoderPhaseImpl;
 
 export async function runReviewPhase(input: ReviewerInput): Promise<ReviewResult> {
   const validatedInput = reviewerInputSchema.parse(input);
