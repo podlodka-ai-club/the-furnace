@@ -37,6 +37,7 @@ import {
   type GitOpsContext,
   type RunCommand,
 } from "../shared/repo-ops.js";
+import { formatPlanAsMarkdown } from "../shared/plan-format.js";
 import { defaultCoderAgentClient } from "./sdk-client.js";
 import type {
   CoderAgentClient,
@@ -565,6 +566,7 @@ export function renderPrompt(
   priorReview?: PriorReview,
 ): string {
   const testList = specOutput.testCommits.map((c) => `- \`${c.path}\``).join("\n");
+  const implementationPlan = formatPlanAsMarkdown(specOutput.implementationPlan);
   return template
     .replaceAll("{{TICKET_IDENTIFIER}}", ticket.identifier)
     .replaceAll("{{TICKET_TITLE}}", ticket.title)
@@ -574,6 +576,7 @@ export function renderPrompt(
     )
     .replaceAll("{{WORKER_REPO_PATH}}", repoPath)
     .replaceAll("{{FEATURE_BRANCH}}", specOutput.featureBranch)
+    .replaceAll("{{IMPLEMENTATION_PLAN}}", implementationPlan)
     .replaceAll("{{TEST_FILES}}", testList)
     .replaceAll("{{PRIOR_REVIEW_SECTION}}", renderPriorReviewSection(priorReview));
 }

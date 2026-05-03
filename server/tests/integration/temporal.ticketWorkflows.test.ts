@@ -31,6 +31,7 @@ import type {
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
 import { installWorkflowCleanupHook } from "./helpers/workflow-cleanup.js";
+import { validImplementationPlan } from "../agents/contracts/fixtures.js";
 
 // Each test gets a unique slug (and therefore a unique per-repo task queue)
 // so that pending activity tasks left over from prior test runs in the shared
@@ -116,6 +117,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
               description: `Failing acceptance tests for ${input.ticket.identifier}`,
             },
           ],
+          implementationPlan: validImplementationPlan,
         };
       },
       runCoderPhase: async (input: CoderPhaseInput) => ({
@@ -211,6 +213,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
               description: `Failing acceptance tests for ${input.ticket.identifier}`,
             },
           ],
+          implementationPlan: validImplementationPlan,
         };
       },
       runCoderPhase: async (input: CoderPhaseInput) => {
@@ -307,6 +310,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
               description: "default",
             },
           ],
+          implementationPlan: validImplementationPlan,
         };
       },
       runCoderPhase: async (_input: CoderPhaseInput) => {
@@ -392,6 +396,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
               description: "default",
             },
           ],
+          implementationPlan: validImplementationPlan,
         };
       },
       runCoderPhase: async (_input: CoderPhaseInput) => {
@@ -472,6 +477,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
               description: "default",
             },
           ],
+          implementationPlan: validImplementationPlan,
         };
       },
       runCoderPhase: async (input: CoderPhaseInput) => {
@@ -562,6 +568,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
               description: "default",
             },
           ],
+          implementationPlan: validImplementationPlan,
         };
       },
       runCoderPhase: async (_input: CoderPhaseInput) => {
@@ -636,6 +643,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             description: "default",
           },
         ],
+        implementationPlan: validImplementationPlan,
       }),
       runCoderPhase: async (input: CoderPhaseInput) => ({
         featureBranch: input.specOutput.featureBranch,
@@ -728,6 +736,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             description: "default",
           },
         ],
+        implementationPlan: validImplementationPlan,
       }),
       runCoderPhase: async (input: CoderPhaseInput) => {
         coderInputs.push(input);
@@ -835,6 +844,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             description: "default",
           },
         ],
+        implementationPlan: validImplementationPlan,
       }),
       runCoderPhase: async (input: CoderPhaseInput) => ({
         featureBranch: input.specOutput.featureBranch,
@@ -949,6 +959,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             description: "default",
           },
         ],
+        implementationPlan: validImplementationPlan,
       }),
       runCoderPhase: async (input: CoderPhaseInput) => {
         coderInputs.push(input);
@@ -1049,6 +1060,7 @@ function buildBaseActivities(): TemporalWorkerActivities {
           description: "default",
         },
       ],
+      implementationPlan: validImplementationPlan,
     }),
     runCoderPhase: async (input: CoderPhaseInput) => ({
       featureBranch: input.specOutput.featureBranch,

@@ -6,6 +6,7 @@ import {
   type OpenPullRequestInput,
 } from "../../src/temporal/activities/github.js";
 import type { GitHubClient } from "../../src/github/client.js";
+import { validImplementationPlan } from "../agents/contracts/fixtures.js";
 
 function makeInput(overrides: Partial<OpenPullRequestInput> = {}): OpenPullRequestInput {
   return {
@@ -21,6 +22,7 @@ function makeInput(overrides: Partial<OpenPullRequestInput> = {}): OpenPullReque
     attemptCount: 1,
     finalCommitSha: "f".repeat(40),
     diffSummary: "2 files changed, +7/-1",
+    implementationPlan: validImplementationPlan,
     ...overrides,
   };
 }

@@ -29,6 +29,7 @@ import type {
   RunCommandResult,
 } from "../../../src/agents/shared/repo-ops.js";
 import type { LinearClientApi } from "../../../src/linear/types.js";
+import { validImplementationPlan } from "./fixtures.js";
 
 describe("phase activities contract boundaries", () => {
   it("returns spec phase output that passes schema validation", async () => {
@@ -54,6 +55,7 @@ describe("phase activities contract boundaries", () => {
                 description: "covers contract",
               },
             ],
+            implementationPlan: validImplementationPlan,
           },
         },
       ];
@@ -132,6 +134,7 @@ describe("phase activities contract boundaries", () => {
           description: "Add failing acceptance criteria tests",
         },
       ],
+      implementationPlan: validImplementationPlan,
     });
 
     const repoPath = await mkdtemp(path.join(os.tmpdir(), "furnace-coder-contract-"));

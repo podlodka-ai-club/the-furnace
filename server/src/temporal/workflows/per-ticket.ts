@@ -196,6 +196,7 @@ export async function perTicketWorkflow(
         attemptCount,
         finalCommitSha: coderOutput.finalCommitSha,
         diffSummary: formatDiffSummary(coderOutput.diffStat),
+        implementationPlan: specOutput.implementationPlan,
       });
     }
     if (!pr) {

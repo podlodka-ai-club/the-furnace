@@ -1,3 +1,6 @@
+import type { ImplementationPlan } from "../agents/contracts/spec-output.js";
+import { formatPlanAsMarkdown } from "../agents/shared/plan-format.js";
+
 const PR_TITLE_MAX_LENGTH = 72;
 const ELLIPSIS = "…";
 
@@ -20,6 +23,7 @@ export interface PrBodyMetadata {
 
 export interface BuildPrBodyArgs {
   ticketDescription: string;
+  implementationPlan: ImplementationPlan;
   diffSummary: string;
   workflowDeepLink: string;
   metadata: PrBodyMetadata;
@@ -34,6 +38,8 @@ export function buildPrBody(args: BuildPrBodyArgs): string {
   if (description.length > 0) {
     lines.push(description, "");
   }
+  lines.push(formatPlanAsMarkdown(args.implementationPlan));
+  lines.push("");
   lines.push(`**Diff:** ${args.diffSummary}`);
   lines.push(`**Workflow:** ${args.workflowDeepLink}`);
   lines.push("");

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ApplicationFailure, Context } from "@temporalio/activity";
 import {
+  type ImplementationPlan,
   type SpecPhaseOutput,
   specPhaseOutputSchema,
 } from "../contracts/index.js";
@@ -173,7 +174,13 @@ async function driveAgentLoop(ctx: InternalContext): Promise<SpecPhaseOutput> {
     let decision = await session.next();
     while (true) {
       if (decision.type === "propose_failing_tests") {
-        const handled = await handleProposeFailingTests(ctx, decision.input.files, session, corrections);
+        const handled = await handleProposeFailingTests(
+          ctx,
+          decision.input.files,
+          decision.input.implementationPlan,
+          session,
+          corrections,
+        );
         if (handled.kind === "done") {
           return handled.output;
         }
@@ -228,6 +235,7 @@ interface HandleProposeContinueResult {
 async function handleProposeFailingTests(
   ctx: InternalContext,
   files: ProposedFile[],
+  implementationPlan: ImplementationPlan,
   session: SpecAgentSession,
   corrections: number,
 ): Promise<HandleProposeDoneResult | HandleProposeContinueResult> {
@@ -279,7 +287,7 @@ async function handleProposeFailingTests(
   heartbeat({ phase: "spec", action: "push", branch: featureBranch });
   await pushBranch(ops, featureBranch);
 
-  const output = { featureBranch, testCommits: commits };
+  const output = { featureBranch, testCommits: commits, implementationPlan };
   // 5. Defense-in-depth: validate before returning so a malformed payload
   // throws rather than reaches the workflow.
   return { kind: "done", output: specPhaseOutputSchema.parse(output) };

@@ -6,6 +6,24 @@ import {
   FURNACE_METADATA_CLOSE,
   FURNACE_METADATA_OPEN,
 } from "../../src/github/trailers.js";
+import { formatPlanAsMarkdown } from "../../src/agents/shared/plan-format.js";
+import type { ImplementationPlan } from "../../src/agents/contracts/spec-output.js";
+
+const SAMPLE_PLAN: ImplementationPlan = {
+  summary: "Add an export feature backed by a typed POST /export route.",
+  workItems: [
+    {
+      area: "backend",
+      description: "Add POST /export streaming a CSV.",
+      coveredByTests: true,
+    },
+    {
+      area: "frontend",
+      description: "Add Export button on the dashboard.",
+      coveredByTests: false,
+    },
+  ],
+};
 
 describe("buildPrTitle", () => {
   it("returns the combined title verbatim when within 72 chars", () => {
@@ -50,6 +68,7 @@ describe("formatDiffSummary", () => {
 describe("buildPrBody", () => {
   const baseArgs = {
     ticketDescription: "User-facing description goes here",
+    implementationPlan: SAMPLE_PLAN,
     diffSummary: "2 files changed, +7/-1",
     workflowDeepLink: "http://localhost:8233/namespaces/default/workflows/ticket-issue_5",
     metadata: {
@@ -77,6 +96,27 @@ describe("buildPrBody", () => {
     expect(body).toContain(baseArgs.workflowDeepLink);
   });
 
+  it("contains exactly one `## Implementation plan` heading", () => {
+    const body = buildPrBody(baseArgs);
+    const matches = body.match(/^## Implementation plan$/gm) ?? [];
+    expect(matches).toHaveLength(1);
+  });
+
+  it("renders the plan via formatPlanAsMarkdown verbatim", () => {
+    const body = buildPrBody(baseArgs);
+    expect(body).toContain(formatPlanAsMarkdown(SAMPLE_PLAN));
+  });
+
+  it("places the plan section after the ticket description and before the diff summary", () => {
+    const body = buildPrBody(baseArgs);
+    const descIdx = body.indexOf("User-facing description goes here");
+    const planIdx = body.indexOf("## Implementation plan");
+    const diffIdx = body.indexOf("**Diff:**");
+    expect(descIdx).toBeGreaterThan(-1);
+    expect(planIdx).toBeGreaterThan(descIdx);
+    expect(diffIdx).toBeGreaterThan(planIdx);
+  });
+
   it("emits a single metadata block with all six required keys in order", () => {
     const body = buildPrBody(baseArgs);
     const openIdx = body.indexOf(FURNACE_METADATA_OPEN);
@@ -99,6 +139,6 @@ describe("buildPrBody", () => {
 
   it("omits the description block when description is blank", () => {
     const body = buildPrBody({ ...baseArgs, ticketDescription: "" });
-    expect(body.startsWith("**Diff:**")).toBe(true);
+    expect(body.startsWith("## Implementation plan")).toBe(true);
   });
 });

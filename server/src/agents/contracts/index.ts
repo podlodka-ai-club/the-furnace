@@ -19,8 +19,14 @@ export {
   reviewerTicketSchema,
 } from "./reviewer-io.js";
 export {
+  type ImplementationPlan,
+  type ImplementationPlanArea,
+  type ImplementationPlanWorkItem,
   type SpecPhaseOutput,
   type SpecTestCommit,
+  implementationPlanAreaSchema,
+  implementationPlanSchema,
+  implementationPlanWorkItemSchema,
   specPhaseOutputSchema,
   specTestCommitSchema,
 } from "./spec-output.js";

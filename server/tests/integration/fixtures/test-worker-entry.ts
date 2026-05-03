@@ -15,6 +15,7 @@ import {
   readContainerWorkerEnv,
 } from "../../../src/worker-env.js";
 import { runContainerWorker } from "../../../src/worker-entry.js";
+import { validImplementationPlan } from "../../agents/contracts/fixtures.js";
 
 interface TestSpecInput {
   ticket: { id: string; identifier: string; title: string; description: string };
@@ -35,6 +36,7 @@ async function slowSpecPhase(input: TestSpecInput): Promise<unknown> {
         description: `Failing acceptance tests for ${input.ticket.identifier}`,
       },
     ],
+    implementationPlan: validImplementationPlan,
   };
 }
 

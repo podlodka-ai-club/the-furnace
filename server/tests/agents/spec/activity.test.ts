@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ApplicationFailure } from "@temporalio/activity";
@@ -21,6 +21,7 @@ import type {
 } from "../../../src/agents/shared/repo-ops.js";
 import type { LinearClientApi, CreatedSubTicket } from "../../../src/linear/types.js";
 import type { ReviewerTicket } from "../../../src/agents/contracts/index.js";
+import { validImplementationPlan } from "../contracts/fixtures.js";
 
 const TICKET: ReviewerTicket = {
   id: "issue_1",
@@ -152,6 +153,7 @@ describe("runSpecPhase", () => {
               description: "covers feature X edges",
             },
           ],
+          implementationPlan: validImplementationPlan,
         },
       },
     ];
@@ -224,6 +226,7 @@ describe("runSpecPhase", () => {
               description: "noop test",
             },
           ],
+          implementationPlan: validImplementationPlan,
         },
       },
       // Second proposal actually fails → activity proceeds to commit/push
@@ -237,6 +240,7 @@ describe("runSpecPhase", () => {
               description: "real failing test",
             },
           ],
+          implementationPlan: validImplementationPlan,
         },
       },
     ];
@@ -418,4 +422,226 @@ describe("runSpecPhase", () => {
     expect(failure.message).toMatch(/503/);
   });
 
+  it("7.1 SpecPhaseOutput carries the implementationPlan verbatim", async () => {
+    const decisions: SpecAgentDecision[] = [
+      {
+        type: "propose_failing_tests",
+        input: {
+          files: [
+            {
+              path: "tests/feature-x.test.ts",
+              contents: "test('x', () => { throw new Error('not yet'); });\n",
+              description: "covers feature X",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        },
+      },
+    ];
+    const { client } = makeStubAgentClient(decisions);
+
+    const { run } = makeScriptedRunCommand([
+      { match: (c, a) => c === "npm" && a[0] === "test", result: fail("AssertionError: not yet") },
+      { match: (c, a) => c === "git" && a[0] === "symbolic-ref", result: ok("origin/main\n") },
+      { match: (c, a) => c === "git" && a[0] === "checkout", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "commit", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "rev-parse", result: ok(`${"a".repeat(40)}\n`) },
+      { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
+    ]);
+
+    const output = await runSpecPhase(
+      { ticket: TICKET },
+      makeBaseDeps({
+        agentClient: client,
+        runCommand: run,
+        resolveRepoPath: () => repoPath,
+      }),
+    );
+
+    expect(output.implementationPlan).toEqual(validImplementationPlan);
+  });
+
+  it("7.2 missing implementationPlan: malformed_tool_call nudges; budget exhaustion → SpecAgentBudgetExhausted", async () => {
+    const decisions: SpecAgentDecision[] = Array.from(
+      { length: SPEC_CORRECTION_BUDGET + 1 },
+      () => ({
+        type: "malformed_tool_call" as const,
+        tool: "propose_failing_tests",
+        error: "Required field 'implementationPlan' is missing",
+      }),
+    );
+    const { client, calls: agentCalls } = makeStubAgentClient(decisions);
+
+    const { run } = makeScriptedRunCommand([]);
+
+    await expect(
+      runSpecPhase(
+        { ticket: TICKET },
+        makeBaseDeps({
+          agentClient: client,
+          runCommand: run,
+          resolveRepoPath: () => repoPath,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      type: SPEC_FAILURE_TYPES.toolBudgetExhausted,
+      nonRetryable: false,
+    });
+
+    expect(agentCalls).toHaveLength(SPEC_CORRECTION_BUDGET + 1);
+    for (let i = 1; i < agentCalls.length; i++) {
+      expect(agentCalls[i].correctiveMessage).toMatch(/invalid arguments/i);
+      expect(agentCalls[i].correctiveMessage).toMatch(/implementationPlan/i);
+    }
+  });
+
+  it("7.3 no non-test files are written on the success path", async () => {
+    const decisions: SpecAgentDecision[] = [
+      {
+        type: "propose_failing_tests",
+        input: {
+          files: [
+            {
+              path: "tests/feature-x.test.ts",
+              contents: "test('x', () => { throw new Error('not yet'); });\n",
+              description: "covers feature X",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        },
+      },
+    ];
+    const { client } = makeStubAgentClient(decisions);
+
+    const { run } = makeScriptedRunCommand([
+      { match: (c, a) => c === "npm" && a[0] === "test", result: fail("AssertionError") },
+      { match: (c, a) => c === "git" && a[0] === "symbolic-ref", result: ok("origin/main\n") },
+      { match: (c, a) => c === "git" && a[0] === "checkout", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "commit", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "rev-parse", result: ok(`${"a".repeat(40)}\n`) },
+      { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
+    ]);
+
+    await runSpecPhase(
+      { ticket: TICKET },
+      makeBaseDeps({
+        agentClient: client,
+        runCommand: run,
+        resolveRepoPath: () => repoPath,
+      }),
+    );
+
+    const written = await listAllFilesRelative(repoPath);
+    expect(written).toEqual(["tests/feature-x.test.ts"]);
+  });
+
+  it("7.3 no non-test files are written on the false-failing-test correction path before exhaustion", async () => {
+    const decisions: SpecAgentDecision[] = [
+      {
+        type: "propose_failing_tests",
+        input: {
+          files: [
+            {
+              path: "tests/passes.test.ts",
+              contents: "test('ok', () => { /* passes */ });\n",
+              description: "noop test",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        },
+      },
+      ...Array.from({ length: SPEC_CORRECTION_BUDGET }, () => ({
+        type: "no_tool_call" as const,
+      })),
+    ];
+    const { client } = makeStubAgentClient(decisions);
+
+    const { run } = makeScriptedRunCommand([
+      { match: (c, a) => c === "npm" && a[0] === "test", result: ok("all good") },
+    ]);
+
+    await expect(
+      runSpecPhase(
+        { ticket: TICKET },
+        makeBaseDeps({
+          agentClient: client,
+          runCommand: run,
+          resolveRepoPath: () => repoPath,
+        }),
+      ),
+    ).rejects.toMatchObject({ type: SPEC_FAILURE_TYPES.toolBudgetExhausted });
+
+    const written = await listAllFilesRelative(repoPath);
+    // Only the agent's proposed test file was written; no plan or design file.
+    expect(written).toEqual(["tests/passes.test.ts"]);
+  });
+
+  it("7.3 no files are written on the AC-clarification path", async () => {
+    const decisions: SpecAgentDecision[] = [
+      {
+        type: "request_ac_clarification",
+        input: {
+          reason: "blocked",
+          questions: ["?"],
+        },
+      },
+    ];
+    const { client } = makeStubAgentClient(decisions);
+
+    const linearClient: LinearClientApi = {
+      listAgentReadyTickets: async () => [],
+      createSubTicket: async () => ({
+        id: "issue_99",
+        identifier: "ENG-99",
+        title: "[ac-clarification] ENG-42",
+      }),
+      postComment: async () => ({ id: "x" }),
+      updateIssueState: async () => {},
+    };
+
+    const { run } = makeScriptedRunCommand([]);
+
+    await expect(
+      runSpecPhase(
+        { ticket: TICKET },
+        makeBaseDeps({
+          agentClient: client,
+          runCommand: run,
+          linearClient,
+          resolveRepoPath: () => repoPath,
+        }),
+      ),
+    ).rejects.toMatchObject({ type: SPEC_FAILURE_TYPES.acClarificationRequested });
+
+    const written = await listAllFilesRelative(repoPath);
+    expect(written).toEqual([]);
+  });
+
 });
+
+async function listAllFilesRelative(root: string): Promise<string[]> {
+  const out: string[] = [];
+  async function walk(rel: string): Promise<void> {
+    const abs = rel === "" ? root : path.join(root, rel);
+    let entries: string[];
+    try {
+      entries = await readdir(abs);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      const childRel = rel === "" ? name : `${rel}/${name}`;
+      const childAbs = path.join(abs, name);
+      const s = await stat(childAbs);
+      if (s.isDirectory()) {
+        await walk(childRel);
+      } else {
+        out.push(childRel);
+      }
+    }
+  }
+  await walk("");
+  return out.sort();
+}

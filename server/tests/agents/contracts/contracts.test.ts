@@ -17,6 +17,8 @@ import {
   invalidSpecPhaseOutput,
   invalidSubTicketRef,
   invalidTestRunSummary,
+  specPhaseOutputInvalidArea,
+  specPhaseOutputMissingPlan,
   validCoderPhaseOutput,
   validDiffStat,
   validReviewResult,
@@ -51,6 +53,16 @@ describe("agent contracts", () => {
     expect(() => coderPhaseOutputSchema.parse(invalidCoderPhaseOutput)).toThrow();
     expect(() => reviewerInputSchema.parse(invalidReviewerInput)).toThrow();
     expect(() => reviewResultSchema.parse(invalidReviewResult)).toThrow();
+  });
+
+  describe("specPhaseOutputSchema implementationPlan invariants", () => {
+    it("rejects a SpecPhaseOutput missing implementationPlan", () => {
+      expect(() => specPhaseOutputSchema.parse(specPhaseOutputMissingPlan)).toThrow();
+    });
+
+    it("rejects a workItem with an area outside the closed set", () => {
+      expect(() => specPhaseOutputSchema.parse(specPhaseOutputInvalidArea)).toThrow();
+    });
   });
 
   describe("reviewResultSchema verdict/severity invariants", () => {

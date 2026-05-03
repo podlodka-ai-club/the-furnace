@@ -23,6 +23,7 @@ import type {
   LaunchWorkerContainerResult,
 } from "../../src/temporal/activities/worker-launcher.js";
 import { installWorkflowCleanupHook } from "./helpers/workflow-cleanup.js";
+import { validImplementationPlan } from "../agents/contracts/fixtures.js";
 
 const TEST_REPO_SLUG = "test-repo";
 const TEST_REGISTRY: ReadonlySet<string> = new Set([TEST_REPO_SLUG]);
@@ -132,6 +133,7 @@ function defaultPhaseActivities(): {
           description: `Failing acceptance tests for ${input.ticket.identifier}`,
         },
       ],
+      implementationPlan: validImplementationPlan,
     }),
     runCoderPhase: async (input: CoderPhaseInput): Promise<CoderPhaseOutput> => ({
       featureBranch: input.specOutput.featureBranch,

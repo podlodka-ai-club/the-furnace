@@ -28,6 +28,7 @@ import type {
   CreatedSubTicket,
   LinearClientApi,
 } from "../../../src/linear/types.js";
+import { validImplementationPlan } from "../contracts/fixtures.js";
 
 const TICKET = {
   id: "issue_42",
@@ -45,6 +46,7 @@ const SPEC_OUTPUT = {
       description: "covers feature Y",
     },
   ],
+  implementationPlan: validImplementationPlan,
 };
 
 function makeStubSession(decisions: CoderAgentDecision[]): {
@@ -783,6 +785,35 @@ describe("renderPrompt", () => {
     );
     expect(out).toContain("## Prior reviewer feedback");
     expect(out).toContain("(no findings)");
+  });
+
+  it("5.3 renders the plan with exactly one `## Implementation plan` heading (regression guard)", async () => {
+    const promptUrl = new URL("../../../src/agents/coder/prompt.md", import.meta.url);
+    const { readFile } = await import("node:fs/promises");
+    const { fileURLToPath } = await import("node:url");
+    const template = await readFile(fileURLToPath(promptUrl), "utf8");
+
+    const out = renderPrompt(template, TICKET, SPEC_OUTPUT, "/workspace");
+
+    const headingMatches = out.match(/^## Implementation plan$/gm) ?? [];
+    expect(headingMatches).toHaveLength(1);
+  });
+
+  it("7.4 renders plan summary and per-item annotations above the test-files block", async () => {
+    const promptUrl = new URL("../../../src/agents/coder/prompt.md", import.meta.url);
+    const { readFile } = await import("node:fs/promises");
+    const { fileURLToPath } = await import("node:url");
+    const template = await readFile(fileURLToPath(promptUrl), "utf8");
+
+    const out = renderPrompt(template, TICKET, SPEC_OUTPUT, "/workspace");
+
+    expect(out).toContain(validImplementationPlan.summary);
+    expect(out).toContain("(test-covered)");
+    expect(out).toContain("(plan-only)");
+    const planIdx = out.indexOf("## Implementation plan");
+    const testsIdx = out.indexOf("## Failing tests committed by the spec agent");
+    expect(planIdx).toBeGreaterThan(-1);
+    expect(testsIdx).toBeGreaterThan(planIdx);
   });
 });
 

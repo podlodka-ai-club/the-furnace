@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { implementationPlanSchema } from "../contracts/spec-output.js";
 
 // Argument schemas for the two custom tools the spec agent is allowed to call.
 // The Claude Agent SDK enforces these against the model's tool-call payloads,
@@ -20,6 +21,7 @@ export const proposeFailingTestsArgsSchema = z.object({
       }),
     )
     .min(1),
+  implementationPlan: implementationPlanSchema,
 });
 
 export type ProposeFailingTestsArgs = z.infer<typeof proposeFailingTestsArgsSchema>;

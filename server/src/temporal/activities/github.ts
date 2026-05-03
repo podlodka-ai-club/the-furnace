@@ -1,6 +1,7 @@
 import { ApplicationFailure } from "@temporalio/activity";
 import { z } from "zod";
 import { reviewerTicketSchema } from "../../agents/contracts/reviewer-io.js";
+import { implementationPlanSchema } from "../../agents/contracts/spec-output.js";
 import { buildWorkflowDeepLink } from "../../agents/coder/activity.js";
 import {
   classifyGitHubError,
@@ -47,6 +48,7 @@ export const openPullRequestInputSchema = z.object({
   attemptCount: z.number().int().nonnegative(),
   finalCommitSha: z.string().min(1),
   diffSummary: z.string().min(1),
+  implementationPlan: implementationPlanSchema,
 });
 
 export type OpenPullRequestInput = z.infer<typeof openPullRequestInputSchema>;
@@ -97,6 +99,7 @@ export async function openPullRequestActivity(
   const workflowDeepLink = buildWorkflowDeepLink(webBase, namespace, validated.workflowId);
   const body = buildPrBody({
     ticketDescription: validated.ticket.description ?? "",
+    implementationPlan: validated.implementationPlan,
     diffSummary: validated.diffSummary,
     workflowDeepLink,
     metadata: {

@@ -22,7 +22,7 @@ import {
 // definitions and the read-only built-in tool set.
 
 const PROPOSE_TOOL_DESCRIPTION =
-  "Submit one or more new failing test files that capture the ticket's acceptance criteria. The orchestrator writes them, runs the suite, and commits each as a separate commit if at least one fails.";
+  "Submit one or more new failing test files together with a structured implementation plan. The plan has a free-form `summary` and a flat `workItems` array (each item: `area` of backend|frontend|config|migration|docs|other, `description`, and `coveredByTests` boolean). The orchestrator writes the test files, runs the suite, and commits each test as a separate commit if at least one fails; the plan rides workflow state into the coder phase and the PR body.";
 
 const CLARIFY_TOOL_DESCRIPTION =
   "Surface that the ticket's acceptance criteria are too ambiguous to translate into tests. The orchestrator opens a Linear sub-ticket with your questions and the workflow pauses for human input.";
