@@ -32,6 +32,12 @@ export const PHASE_ACTIVITY_DEFAULTS: ActivityOptions = {
 // Each attempt launches a fresh container.
 export const PHASE_MAX_ATTEMPTS = 3;
 
+// Maximum coder ↔ reviewer iteration rounds the workflow will run before
+// giving up with `ReviewRoundCapExhausted`. Workflow callers may override this
+// per-execution via `PerTicketWorkflowInput.maxReviewRounds` (used by tests
+// that need to force cap exhaustion); otherwise this default applies.
+export const MAX_REVIEW_ROUNDS = 3;
+
 export interface PhaseActivitiesForRepoOptions {
   overrides?: Partial<ActivityOptions>;
 }

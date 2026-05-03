@@ -58,7 +58,54 @@ export async function findOpenPR(
   return { number: first.number, url: first.html_url };
 }
 
-export type GitHubErrorKind = "auth" | "headMissing" | "duplicate" | "transient" | "other";
+export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES";
+
+export interface ReviewCommentInput {
+  path: string;
+  line?: number;
+  body: string;
+}
+
+export interface PostReviewArgs {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  event: ReviewEvent;
+  body: string;
+  comments: ReadonlyArray<ReviewCommentInput>;
+}
+
+export interface PostReviewResult {
+  reviewId: number;
+}
+
+export async function postReview(
+  client: GitHubClient,
+  args: PostReviewArgs,
+): Promise<PostReviewResult> {
+  const response = await client.pulls.createReview({
+    owner: args.owner,
+    repo: args.repo,
+    pull_number: args.pullNumber,
+    event: args.event,
+    body: args.body,
+    comments: args.comments.map((c) => ({
+      path: c.path,
+      body: c.body,
+      ...(c.line !== undefined ? { line: c.line, side: "RIGHT" as const } : {}),
+    })),
+  });
+  return { reviewId: response.data.id };
+}
+
+export type GitHubErrorKind =
+  | "auth"
+  | "headMissing"
+  | "duplicate"
+  | "transient"
+  | "notFound"
+  | "staleLine"
+  | "other";
 
 export interface ClassifiedGitHubError {
   kind: GitHubErrorKind;
@@ -77,6 +124,10 @@ export function classifyGitHubError(err: unknown): ClassifiedGitHubError {
     return { kind: "auth", status, original: err };
   }
 
+  if (status === 404) {
+    return { kind: "notFound", status, original: err };
+  }
+
   if (status === 422) {
     if (
       message.includes("head") &&
@@ -86,6 +137,12 @@ export function classifyGitHubError(err: unknown): ClassifiedGitHubError {
     }
     if (message.includes("already exists") || message.includes("a pull request already exists")) {
       return { kind: "duplicate", status, original: err };
+    }
+    if (
+      (message.includes("line") || message.includes("position")) &&
+      (message.includes("diff") || message.includes("not part") || message.includes("invalid"))
+    ) {
+      return { kind: "staleLine", status, original: err };
     }
     return { kind: "other", status, original: err };
   }

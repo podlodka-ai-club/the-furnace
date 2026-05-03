@@ -15,7 +15,7 @@ Constraints carried over from existing specs:
 - The verdict is mirrored to the existing PR via the GitHub Reviews API so it is visible to humans and to the coder agent on follow-up rounds.
 - On `changes_requested`, the workflow re-enters the coder phase with the prior review attached, bounded to `MAX_REVIEW_ROUNDS` total rounds (default 3).
 - Failure on cap exhaustion preserves the last review on the PR and surfaces a non-retryable workflow failure for human takeover.
-- One `reviews` row per round, persona `architect`, schema-compatible with the existing `data-model`.
+- Round audit relies on Temporal workflow history (activity inputs/outputs) and on the PR (one posted review per round); no orchestrator-side persistence is added in this change.
 
 **Non-Goals:**
 - Multi-persona fan-out, vote aggregation, tie-break logic — deferred to `persona-reviewers` / `vote-aggregator`.
@@ -88,9 +88,14 @@ The ticket stays in `In Progress` for every round (initial set on workflow entry
 - terminal `approve` → `Done` (current behavior).
 - cap exhaustion → ticket stays `In Progress`, workflow throws non-retryable `ApplicationFailure` of type `ReviewRoundCapExhausted`. This mirrors the `DepMissingRequested` / `DesignQuestionRequested` "human-pause" pattern: the PR is the artifact a human picks up, identical in spirit to a Linear sub-ticket.
 
-### D7: One `reviews` row per round, persona `architect`
+### D7: No DB persistence — audit via Temporal history + posted PR reviews
 
-Each completed review activity persists a row keyed by `(workflowId, attemptId, round, persona='architect')`. The activity persists the row before returning so the workflow's view and the DB stay consistent across crashes. Schema additions for round-counter or structured findings are out of scope here — if `reviews.findings` is currently a `text` column the JSON-encoded array fits without migration; otherwise the data-model change rides separately.
+The `drop-orchestrator-db` change deleted the `reviews` table and the entire orchestrator DB. Each round's verdict, reasoning, and findings are durable in two places already:
+
+1. **Temporal workflow history** captures `runReviewPhase` activity inputs/outputs across crashes — the same durability property the deleted DB row was meant to provide.
+2. **The PR itself** carries one posted review per round (D2), giving humans an authoritative audit trail without leaving GitHub.
+
+A future change (`vote-aggregator` for cross-persona aggregation, or a dedicated analytics store) will pick a real datastore when there is a consumer that cannot be served by Temporal history or PR reviews. Adding storage now would inherit the same in-process WASM DB the recent incident removed.
 
 ## Risks / Trade-offs
 

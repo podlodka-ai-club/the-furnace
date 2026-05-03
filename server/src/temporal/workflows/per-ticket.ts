@@ -9,6 +9,9 @@ import {
 } from "@temporalio/workflow";
 import type {
   CoderPhaseOutput,
+  Finding,
+  PriorReview,
+  ReviewResult,
   ReviewerInput,
   ReviewerTicket,
   SpecPhaseOutput,
@@ -17,12 +20,14 @@ import type * as githubActivities from "../activities/github.js";
 import type * as linearActivities from "../activities/linear.js";
 import type * as workerLauncherActivities from "../activities/worker-launcher.js";
 import type { LaunchWorkerContainerResult } from "../activities/worker-launcher.js";
-import { PHASE_MAX_ATTEMPTS, phaseActivitiesForRepo } from "../dispatch.js";
+import { MAX_REVIEW_ROUNDS, PHASE_MAX_ATTEMPTS, phaseActivitiesForRepo } from "../dispatch.js";
 import { formatDiffSummary } from "../../github/trailers.js";
 
 const SPEC_AC_CLARIFICATION_FAILURE_TYPE = "AcClarificationRequested";
 const CODER_DEP_MISSING_FAILURE_TYPE = "DepMissingRequested";
 const CODER_DESIGN_QUESTION_FAILURE_TYPE = "DesignQuestionRequested";
+
+export const REVIEW_ROUND_CAP_EXHAUSTED_FAILURE_TYPE = "ReviewRoundCapExhausted";
 
 export const PER_TICKET_WORKFLOW_NAME = "perTicketWorkflow";
 
@@ -39,6 +44,10 @@ export interface PerTicketWorkflowInput {
   // Required: identifies which per-repo task queue to dispatch phase activities
   // to and which container image to launch. See container-worker-lifecycle spec.
   targetRepoSlug: string;
+  // Optional override for the workflow-local cap on coder ↔ reviewer iteration
+  // rounds. Used by integration tests that need to force cap exhaustion without
+  // touching `MAX_REVIEW_ROUNDS`. Falls back to the dispatch constant.
+  maxReviewRounds?: number;
 }
 
 export interface PerTicketWorkflowResult {
@@ -49,6 +58,7 @@ export interface PerTicketWorkflowResult {
 export const cancelSignal = defineSignal("cancel");
 export const currentPhaseQuery = defineQuery<PerTicketWorkflowPhase>("currentPhase");
 export const attemptCountQuery = defineQuery<number>("attemptCount");
+export const currentRoundQuery = defineQuery<number>("currentRound");
 
 const { syncLinearTicketStateActivity } = proxyActivities<typeof linearActivities>({
   startToCloseTimeout: "1 minute",
@@ -79,7 +89,9 @@ const { validateRepoSlug } = proxyActivities<typeof workerLauncherActivities>({
   },
 });
 
-const { openPullRequestActivity } = proxyActivities<typeof githubActivities>({
+const { openPullRequestActivity, postPullRequestReviewActivity } = proxyActivities<
+  typeof githubActivities
+>({
   startToCloseTimeout: "1 minute",
   retry: {
     initialInterval: "2 seconds",
@@ -94,6 +106,7 @@ export async function perTicketWorkflow(
 ): Promise<PerTicketWorkflowResult> {
   let currentPhase: PerTicketWorkflowPhase = "queued";
   let attemptCount = 0;
+  let currentRound = 0;
   let cancelled = false;
 
   setHandler(cancelSignal, () => {
@@ -101,6 +114,7 @@ export async function perTicketWorkflow(
   });
   setHandler(currentPhaseQuery, () => currentPhase);
   setHandler(attemptCountQuery, () => attemptCount);
+  setHandler(currentRoundQuery, () => currentRound);
 
   // Defense-in-depth: the Linear client now guarantees a non-empty slug at the
   // producer boundary (see linear-target-repo-resolution change), so this check
@@ -109,6 +123,14 @@ export async function perTicketWorkflow(
   if (!input.targetRepoSlug || input.targetRepoSlug.trim().length === 0) {
     throw ApplicationFailure.nonRetryable(
       "perTicketWorkflow requires targetRepoSlug; got empty value",
+      "InvalidWorkflowInput",
+    );
+  }
+
+  const maxReviewRounds = input.maxReviewRounds ?? MAX_REVIEW_ROUNDS;
+  if (!Number.isInteger(maxReviewRounds) || maxReviewRounds < 1) {
+    throw ApplicationFailure.nonRetryable(
+      `perTicketWorkflow maxReviewRounds must be a positive integer; got ${maxReviewRounds}`,
       "InvalidWorkflowInput",
     );
   }
@@ -131,56 +153,131 @@ export async function perTicketWorkflow(
     return { status: "cancelled" };
   }
 
-  // Stuck-failures (DepMissingRequested, DesignQuestionRequested) propagate
-  // out of runPhase without retrying. The workflow does NOT sync the Linear
-  // ticket to "Canceled" — it stays "In Progress" so a human can resolve the
-  // sub-ticket and the orchestrator re-enqueues from `agent-ready`. The
-  // structured failure detail (`subTicketRef`) is preserved in Temporal's
-  // workflow event history via the rethrown ApplicationFailure.
-  const coderOutput: CoderPhaseOutput | null = await runPhase(
-    "coder",
-    () => runCoderPhase({ ticket: input.ticket, specOutput }),
+  let pr: { number: number; url: string } | undefined;
+  let priorReview: PriorReview | undefined;
+  let lastReview: ReviewResult | undefined;
+
+  for (let round = 0; round < maxReviewRounds; round += 1) {
+    currentRound = round;
+
+    if (cancelled) {
+      await transitionToCancelled();
+      return { status: "cancelled" };
+    }
+
+    // Stuck-failures (DepMissingRequested, DesignQuestionRequested) propagate
+    // out of runPhase without retrying. The workflow does NOT sync the Linear
+    // ticket to "Canceled" — it stays "In Progress" so a human can resolve
+    // the sub-ticket and the orchestrator re-enqueues from `agent-ready`. The
+    // structured failure detail (`subTicketRef`) is preserved in Temporal's
+    // workflow event history via the rethrown ApplicationFailure.
+    const coderOutput: CoderPhaseOutput | null = await runPhase(
+      "coder",
+      () => runCoderPhase({ ticket: input.ticket, specOutput, priorReview }),
+      {
+        stuckFailureTypes: [
+          CODER_DEP_MISSING_FAILURE_TYPE,
+          CODER_DESIGN_QUESTION_FAILURE_TYPE,
+        ],
+      },
+    );
+    if (coderOutput === null) {
+      return { status: "cancelled" };
+    }
+
+    // Open the PR exactly once, after the round-0 coder phase. Subsequent
+    // rounds reuse the same PR number and post follow-up reviews against it.
+    if (round === 0) {
+      pr = await openPullRequestActivity({
+        featureBranch: coderOutput.featureBranch,
+        targetRepoSlug: input.targetRepoSlug,
+        ticket: input.ticket,
+        workflowId: workflowInfo().workflowId,
+        attemptCount,
+        finalCommitSha: coderOutput.finalCommitSha,
+        diffSummary: formatDiffSummary(coderOutput.diffStat),
+      });
+    }
+    if (!pr) {
+      throw ApplicationFailure.nonRetryable(
+        "internal: PR reference missing after round-0 openPullRequestActivity",
+        "InvalidWorkflowState",
+      );
+    }
+
+    const reviewerInput: ReviewerInput = {
+      ticket: input.ticket,
+      featureBranch: coderOutput.featureBranch,
+      finalCommitSha: coderOutput.finalCommitSha,
+      diffStat: coderOutput.diffStat,
+      testRunSummary: coderOutput.testRunSummary,
+      prNumber: pr.number,
+      round,
+    };
+    // Pass `cancelAfterSuccess: false` so that if cancel arrives during or just
+    // after the review activity, we still receive the verdict and post it. The
+    // "post after every review round" audit contract is stronger than racing
+    // cancellation; the cancel transition happens at the top of the next loop
+    // iteration.
+    const reviewOutput = await runPhase("review", () => runReviewPhase(reviewerInput), {
+      cancelAfterSuccess: false,
+    });
+    if (reviewOutput === null) {
+      return { status: "cancelled" };
+    }
+    lastReview = reviewOutput;
+
+    const inlineComments = reviewOutput.findings
+      .filter((f: Finding) => f.line !== undefined)
+      .map((f: Finding) => ({
+        path: f.path,
+        line: f.line as number,
+        body: `[${f.severity}] ${f.message}`,
+      }));
+    const topLevelFindings = reviewOutput.findings.filter(
+      (f: Finding) => f.line === undefined,
+    );
+    const reviewBody =
+      topLevelFindings.length > 0
+        ? `${reviewOutput.reasoning}\n\n## Additional findings\n\n${topLevelFindings
+            .map((f: Finding) => `- [${f.severity}] \`${f.path}\`: ${f.message}`)
+            .join("\n")}`
+        : reviewOutput.reasoning;
+
+    await postPullRequestReviewActivity({
+      targetRepoSlug: input.targetRepoSlug,
+      prNumber: pr.number,
+      verdict: reviewOutput.verdict,
+      body: reviewBody,
+      comments: inlineComments,
+    });
+
+    if (reviewOutput.verdict === "approve") {
+      currentPhase = "completed";
+      await syncLinearTicketStateActivity({
+        ticketId: input.ticket.id,
+        stateName: "Done",
+      });
+      return { status: "succeeded", pr };
+    }
+
+    priorReview = {
+      prNumber: pr.number,
+      reviewSummary: reviewOutput.reasoning,
+      findings: reviewOutput.findings,
+    };
+  }
+
+  throw ApplicationFailure.nonRetryable(
+    `Review round cap of ${maxReviewRounds} exhausted without approval`,
+    REVIEW_ROUND_CAP_EXHAUSTED_FAILURE_TYPE,
     {
-      stuckFailureTypes: [
-        CODER_DEP_MISSING_FAILURE_TYPE,
-        CODER_DESIGN_QUESTION_FAILURE_TYPE,
-      ],
+      verdict: lastReview?.verdict,
+      reasoning: lastReview?.reasoning,
+      findings: lastReview?.findings,
+      prNumber: pr?.number,
     },
   );
-  if (coderOutput === null) {
-    return { status: "cancelled" };
-  }
-
-  // TODO(review-agent): once review-agent lands, move this PR-open call onto
-  // the review approve path and gate it on `reviewOutput.verdict === "approve"`.
-  // The runReviewPhase no-op is intentionally left in place below so the
-  // workflow shape (spec → coder → review → completed) and the currentPhase
-  // query semantics survive until that change ships.
-  const pr = await openPullRequestActivity({
-    featureBranch: coderOutput.featureBranch,
-    targetRepoSlug: input.targetRepoSlug,
-    ticket: input.ticket,
-    workflowId: workflowInfo().workflowId,
-    attemptCount,
-    finalCommitSha: coderOutput.finalCommitSha,
-    diffSummary: formatDiffSummary(coderOutput.diffStat),
-  });
-
-  const reviewerInput: ReviewerInput = {
-    ...coderOutput,
-    ticket: input.ticket,
-  };
-  const reviewOutput = await runPhase("review", () => runReviewPhase(reviewerInput));
-  if (reviewOutput === null) {
-    return { status: "cancelled" };
-  }
-
-  currentPhase = "completed";
-  await syncLinearTicketStateActivity({
-    ticketId: input.ticket.id,
-    stateName: "Done",
-  });
-  return { status: "succeeded", pr };
 
   async function runSpecPhaseWithRecording(): Promise<SpecPhaseOutput | null> {
     return await runPhase("spec", () => runSpecPhase({ ticket: input.ticket }), {
@@ -201,9 +298,17 @@ export async function perTicketWorkflow(
   async function runPhase<T>(
     phase: "spec" | "coder" | "review",
     fn: () => Promise<T>,
-    options: { stuckFailureTypes?: readonly string[] } = {},
+    options: {
+      stuckFailureTypes?: readonly string[];
+      // When false, do NOT honor cancellation that arrives during/just after a
+      // successful activity — return the output and let the caller act on it
+      // before transitioning to cancelled. Used by the review phase to ensure
+      // the verdict is always posted to the PR.
+      cancelAfterSuccess?: boolean;
+    } = {},
   ): Promise<T | null> {
     const stuckTypes = options.stuckFailureTypes ?? [];
+    const cancelAfterSuccess = options.cancelAfterSuccess !== false;
     let lastError: unknown;
     for (let attempt = 1; attempt <= PHASE_MAX_ATTEMPTS; attempt += 1) {
       if (cancelled) {
@@ -225,7 +330,7 @@ export async function perTicketWorkflow(
       try {
         const output = await fn();
 
-        if (cancelled) {
+        if (cancelAfterSuccess && cancelled) {
           await transitionToCancelled();
           return null;
         }

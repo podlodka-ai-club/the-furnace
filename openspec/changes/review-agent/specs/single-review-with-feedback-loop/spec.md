@@ -68,23 +68,6 @@ The review activity SHALL receive the coder phase's test-run summary verbatim an
 - **THEN** it MUST NOT invoke the repo's `package.json` test script
 - **AND** it MUST consume `input.testSummary` as the source of truth for test pass/fail counts
 
-### Requirement: Reviewer Persists Verdict Before Returning
-
-The review activity SHALL insert exactly one row in the `reviews` table for each executed round before returning to the workflow. The row SHALL be keyed by `(workflowId, attemptId, round)` with persona literal `architect` for MVP compatibility with the existing data model. The row SHALL include the verdict, the reasoning, and JSON-encoded findings.
-
-#### Scenario: Row persisted before return
-
-- **WHEN** the review activity is ready to return its `ReviewResult`
-- **THEN** it MUST have inserted a row in `reviews` for the current `(workflowId, attemptId, round)`
-- **AND** the persona column MUST be the literal string `architect`
-- **AND** the verdict, reasoning, and findings columns MUST match the returned `ReviewResult`
-
-#### Scenario: One row per round
-
-- **WHEN** the workflow runs N rounds for a single ticket attempt
-- **THEN** exactly N rows MUST exist in `reviews` for that `(workflowId, attemptId)` pair
-- **AND** their `round` values MUST be `0..N-1`
-
 ### Requirement: Activity Heartbeats On Schedule
 
 The review activity SHALL heartbeat at a cadence that fits within the workflow's `heartbeatTimeout` of 30 seconds, including during long-running SDK conversations, so cooperative cancellation is honored.

@@ -241,9 +241,54 @@ describe("phase activities contract boundaries", () => {
       finalCommitSha: "b".repeat(40),
       diffStat: { filesChanged: 2, insertions: 10, deletions: 1 },
       testRunSummary: { total: 2, passed: 2, failed: 0, durationMs: 1200 },
+      prNumber: 7,
+      round: 0,
     });
 
-    const output = await runReviewPhase(reviewerInput);
+    const decisions = [
+      {
+        type: "submit_review" as const,
+        input: {
+          verdict: "approve" as const,
+          reasoning: "Diff looks correct and minimal.",
+          findings: [],
+        },
+      },
+    ];
+    let cursor = 0;
+    const session = {
+      next: async () => decisions[cursor++],
+      close: async () => {},
+    };
+    const agentClient = {
+      startSession: async () => session,
+    };
+
+    const ok = (stdout = ""): RunCommandResult => ({ exitCode: 0, stdout, stderr: "" });
+    const steps: Array<(c: string, a: string[]) => RunCommandResult | null> = [
+      // checkoutFeatureBranch: git fetch
+      (c, a) => (c === "git" && a[0] === "fetch" ? ok() : null),
+      // checkoutFeatureBranch: git checkout -B
+      (c, a) => (c === "git" && a[0] === "checkout" ? ok() : null),
+      // checkoutFeatureBranch: git status --porcelain (clean)
+      (c, a) => (c === "git" && a[0] === "status" ? ok("") : null),
+    ];
+    let stepIdx = 0;
+    const runCommand: RunCommand = async (command, args) => {
+      while (stepIdx < steps.length) {
+        const result = steps[stepIdx](command, args);
+        stepIdx += 1;
+        if (result) return result;
+      }
+      throw new Error(`unexpected runCommand: ${command} ${args.join(" ")}`);
+    };
+
+    const output = await runReviewPhase(reviewerInput, {
+      agentClient,
+      loadPrompt: async () => "system prompt",
+      resolveRepoPath: () => "/tmp/repo",
+      runCommand,
+    });
     expect(reviewResultSchema.parse(output)).toEqual(output);
   });
 });

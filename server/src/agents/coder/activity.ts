@@ -7,7 +7,9 @@ import {
   coderPhaseOutputSchema,
 } from "../contracts/index.js";
 import {
+  priorReviewSchema,
   reviewerTicketSchema,
+  type PriorReview,
   type ReviewerTicket,
 } from "../contracts/reviewer-io.js";
 import {
@@ -64,6 +66,7 @@ export const CODER_FAILURE_TYPES = {
 export const coderPhaseInputSchema = z.object({
   ticket: reviewerTicketSchema,
   specOutput: specPhaseOutputSchema,
+  priorReview: priorReviewSchema.optional(),
 });
 
 export type CoderPhaseInput = z.infer<typeof coderPhaseInputSchema>;
@@ -88,6 +91,7 @@ export interface RunCoderPhaseDeps {
 interface InternalContext {
   ticket: ReviewerTicket;
   specOutput: SpecPhaseOutput;
+  priorReview: PriorReview | undefined;
   repoPath: string;
   workflowId: string;
   namespace: string;
@@ -117,11 +121,18 @@ export async function runCoderPhase(
   const loadPrompt = deps.loadPrompt ?? loadDefaultPrompt;
 
   const promptTemplate = await loadPrompt();
-  const prompt = renderPrompt(promptTemplate, validated.ticket, validated.specOutput, repoPath);
+  const prompt = renderPrompt(
+    promptTemplate,
+    validated.ticket,
+    validated.specOutput,
+    repoPath,
+    validated.priorReview,
+  );
 
   const internal: InternalContext = {
     ticket: validated.ticket,
     specOutput: validated.specOutput,
+    priorReview: validated.priorReview,
     repoPath,
     workflowId: meta.workflowId,
     namespace: meta.namespace,
@@ -216,7 +227,9 @@ async function driveAgentLoop(
     }
   } finally {
     clearInterval(heartbeatTimer);
-    abort.abort();
+    // Close first so the SDK can flush the in-flight MCP tool ack write
+    // before we abort. Aborting first kills the child process mid-write and
+    // surfaces an unhandled AbortError from ProcessTransport.write.
     if (session) {
       try {
         await session.close();
@@ -224,6 +237,7 @@ async function driveAgentLoop(
         // best-effort cleanup
       }
     }
+    abort.abort();
   }
 }
 
@@ -500,6 +514,7 @@ export function renderPrompt(
   ticket: ReviewerTicket,
   specOutput: SpecPhaseOutput,
   repoPath: string,
+  priorReview?: PriorReview,
 ): string {
   const testList = specOutput.testCommits.map((c) => `- \`${c.path}\``).join("\n");
   return template
@@ -511,7 +526,34 @@ export function renderPrompt(
     )
     .replaceAll("{{WORKER_REPO_PATH}}", repoPath)
     .replaceAll("{{FEATURE_BRANCH}}", specOutput.featureBranch)
-    .replaceAll("{{TEST_FILES}}", testList);
+    .replaceAll("{{TEST_FILES}}", testList)
+    .replaceAll("{{PRIOR_REVIEW_SECTION}}", renderPriorReviewSection(priorReview));
+}
+
+function renderPriorReviewSection(priorReview: PriorReview | undefined): string {
+  if (!priorReview) {
+    return "";
+  }
+  const findingLines = priorReview.findings.map((f) => {
+    const loc = f.line !== undefined ? `${f.path}:${f.line}` : f.path;
+    return `- [${f.severity}] ${loc} — ${f.message}`;
+  });
+  const findingsBlock = findingLines.length > 0 ? findingLines.join("\n") : "(no findings)";
+  return [
+    "",
+    "## Prior reviewer feedback",
+    "",
+    `A previous review of PR #${priorReview.prNumber} requested changes. Address every blocking finding while keeping the spec tests green; advisory findings are suggestions you may decline.`,
+    "",
+    "### Reviewer summary",
+    "",
+    priorReview.reviewSummary,
+    "",
+    "### Findings",
+    "",
+    findingsBlock,
+    "",
+  ].join("\n");
 }
 
 async function loadDefaultPrompt(): Promise<string> {

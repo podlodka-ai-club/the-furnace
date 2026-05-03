@@ -97,6 +97,10 @@ function buildOrchestratorActivities(
       number: 1,
       url: "https://github.test/example/pr/1",
     }),
+    postPullRequestReviewActivity: async () => ({
+      reviewId: 1,
+      droppedComments: 0,
+    }),
     validateRepoSlug: async ({ slug }) => {
       state.validateCalls.push(slug);
     },

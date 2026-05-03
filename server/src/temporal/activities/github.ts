@@ -7,8 +7,12 @@ import {
   createGitHubClient,
   findOpenPR,
   openPR,
+  postReview,
   type GitHubClient,
+  type PostReviewResult,
   type PullRequestRef,
+  type ReviewCommentInput,
+  type ReviewEvent,
 } from "../../github/client.js";
 import { buildPrBody, buildPrTitle } from "../../github/trailers.js";
 import {
@@ -31,6 +35,8 @@ export const GITHUB_FAILURE_TYPES = {
   duplicateNotFound: "GitHubDuplicatePrNotFound",
   tokenMissing: "GitHubTokenMissing",
   badResponse: "GitHubBadResponse",
+  pullRequestMissing: "GitHubPullRequestMissing",
+  reviewRejected: "GitHubReviewRejected",
 } as const;
 
 export const openPullRequestInputSchema = z.object({
@@ -160,5 +166,117 @@ function resolveToken(override?: () => string): string {
       err instanceof Error ? err.message : String(err),
       GITHUB_FAILURE_TYPES.tokenMissing,
     );
+  }
+}
+
+const reviewVerdictForActivitySchema = z.enum(["approve", "changes_requested"]);
+
+export const postPullRequestReviewInputSchema = z.object({
+  targetRepoSlug: z.string().min(1),
+  prNumber: z.number().int().positive(),
+  verdict: reviewVerdictForActivitySchema,
+  body: z.string().min(1),
+  comments: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        line: z.number().int().positive().optional(),
+        body: z.string().min(1),
+      }),
+    )
+    .default([]),
+});
+
+export type PostPullRequestReviewInput = z.infer<typeof postPullRequestReviewInputSchema>;
+
+export interface PostPullRequestReviewResult {
+  reviewId: number;
+  droppedComments: number;
+}
+
+export interface PostPullRequestReviewDeps {
+  createClient?: (token: string) => GitHubClient;
+  resolveToken?: () => string;
+  loadRegistry?: () => Promise<RepoSlugRegistryEntry[]>;
+}
+
+export async function postPullRequestReviewActivity(
+  input: PostPullRequestReviewInput,
+  deps: PostPullRequestReviewDeps = {},
+): Promise<PostPullRequestReviewResult> {
+  const validated = postPullRequestReviewInputSchema.parse(input);
+
+  const registry = await (deps.loadRegistry ?? loadRepoSlugRegistry)();
+  const entry = findRegistryEntry(registry, validated.targetRepoSlug);
+  if (!entry) {
+    throw ApplicationFailure.nonRetryable(
+      `Unknown targetRepoSlug '${validated.targetRepoSlug}' — not present in repo registry`,
+      GITHUB_FAILURE_TYPES.unknownRepoSlug,
+    );
+  }
+  if (!entry.owner || !entry.name) {
+    throw ApplicationFailure.nonRetryable(
+      `Repo registry entry for '${validated.targetRepoSlug}' is missing one of owner/name required for PR review post`,
+      GITHUB_FAILURE_TYPES.registryEntryIncomplete,
+    );
+  }
+
+  const token = resolveToken(deps.resolveToken);
+  const client = (deps.createClient ?? createGitHubClient)(token);
+
+  const event: ReviewEvent = validated.verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES";
+  const comments: ReviewCommentInput[] = validated.comments.map((c) => ({
+    path: c.path,
+    body: c.body,
+    ...(c.line !== undefined ? { line: c.line } : {}),
+  }));
+
+  try {
+    const result = await postReview(client, {
+      owner: entry.owner,
+      repo: entry.name,
+      pullNumber: validated.prNumber,
+      event,
+      body: validated.body,
+      comments,
+    });
+    return { reviewId: result.reviewId, droppedComments: 0 };
+  } catch (err) {
+    const classified = classifyGitHubError(err);
+    if (classified.kind === "auth") {
+      throw ApplicationFailure.nonRetryable(
+        `GitHub rejected authentication while posting PR review for ${validated.targetRepoSlug}#${validated.prNumber}`,
+        GITHUB_FAILURE_TYPES.authFailed,
+      );
+    }
+    if (classified.kind === "notFound") {
+      throw ApplicationFailure.nonRetryable(
+        `GitHub reports PR #${validated.prNumber} on ${entry.owner}/${entry.name} does not exist`,
+        GITHUB_FAILURE_TYPES.pullRequestMissing,
+      );
+    }
+    if (classified.kind === "staleLine") {
+      const droppedPaths = comments.map((c) => `${c.path}${c.line ? `:${c.line}` : ""}`);
+      console.warn(
+        `[postPullRequestReview] dropping ${comments.length} inline comment(s) due to stale-line 422; retrying with no inline comments. Dropped: ${droppedPaths.join(", ")}`,
+      );
+      const fallback: PostReviewResult = await postReview(client, {
+        owner: entry.owner,
+        repo: entry.name,
+        pullNumber: validated.prNumber,
+        event,
+        body: validated.body,
+        comments: [],
+      });
+      return { reviewId: fallback.reviewId, droppedComments: comments.length };
+    }
+    if (classified.status === 422) {
+      throw ApplicationFailure.nonRetryable(
+        `GitHub rejected the PR review for ${validated.targetRepoSlug}#${validated.prNumber}: ${err instanceof Error ? err.message : String(err)}`,
+        GITHUB_FAILURE_TYPES.reviewRejected,
+      );
+    }
+    // 5xx, transient, network → propagate as-is so Temporal retries.
+    throw err;
   }
 }

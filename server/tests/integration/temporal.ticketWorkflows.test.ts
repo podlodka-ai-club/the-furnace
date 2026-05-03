@@ -18,7 +18,9 @@ import {
   buildPerTicketWorkflowId,
   cancelSignal,
   currentPhaseQuery,
+  currentRoundQuery,
   PER_TICKET_WORKFLOW_NAME,
+  REVIEW_ROUND_CAP_EXHAUSTED_FAILURE_TYPE,
   attemptCountQuery,
 } from "../../src/temporal/workflows/per-ticket.js";
 import type { CoderPhaseInput, SpecPhaseInput } from "../../src/temporal/activities/phases.js";
@@ -609,6 +611,425 @@ describe("Temporal per-ticket workflow orchestration", () => {
     expect(phaseCalls).toContain("coder");
     expect(phaseCalls).not.toContain("review");
   }, 30_000);
+
+  it("review round 0 happy path: single openPR, single postReview with APPROVE, succeeded", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    let openPrCalls = 0;
+    const postReviewCalls: Array<{
+      verdict: string;
+      prNumber: number;
+      commentCount: number;
+    }> = [];
+    const reviewerInputs: ReviewerInput[] = [];
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => ({
+        featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+        testCommits: [
+          {
+            sha: "a".repeat(40),
+            path: "server/tests/integration/sample.test.ts",
+            description: "default",
+          },
+        ],
+      }),
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (input: ReviewerInput) => {
+        reviewerInputs.push(input);
+        return {
+          verdict: "approve" as const,
+          reasoning: "All clean.",
+          findings: [],
+        };
+      },
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      openPullRequestActivity: async () => {
+        openPrCalls += 1;
+        return { number: 42, url: "https://github.test/example/pr/42" };
+      },
+      postPullRequestReviewActivity: async (input) => {
+        postReviewCalls.push({
+          verdict: input.verdict,
+          prNumber: input.prNumber,
+          commentCount: input.comments.length,
+        });
+        return { reviewId: 1, droppedComments: 0 };
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_round0",
+                identifier: "ENG-100",
+                title: "round 0 happy",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `ticket-test-${randomUUID()}`,
+        });
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 42, url: "https://github.test/example/pr/42" },
+        });
+      });
+    });
+
+    expect(openPrCalls).toBe(1);
+    expect(postReviewCalls).toEqual([
+      { verdict: "approve", prNumber: 42, commentCount: 0 },
+    ]);
+    expect(reviewerInputs).toHaveLength(1);
+    expect(reviewerInputs[0].round).toBe(0);
+    expect(reviewerInputs[0].prNumber).toBe(42);
+  }, 30_000);
+
+  it("review iterate path: round 0 changes_requested then round 1 approve, single openPR, two reviews", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    let openPrCalls = 0;
+    const postReviewVerdicts: string[] = [];
+    const reviewerInputs: ReviewerInput[] = [];
+    const coderInputs: CoderPhaseInput[] = [];
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => ({
+        featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+        testCommits: [
+          {
+            sha: "a".repeat(40),
+            path: "server/tests/integration/sample.test.ts",
+            description: "default",
+          },
+        ],
+      }),
+      runCoderPhase: async (input: CoderPhaseInput) => {
+        coderInputs.push(input);
+        return {
+          featureBranch: input.specOutput.featureBranch,
+          finalCommitSha: input.priorReview ? "b".repeat(40) : "a".repeat(40),
+          diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+          testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+        };
+      },
+      runReviewPhase: async (input: ReviewerInput) => {
+        reviewerInputs.push(input);
+        if (input.round === 0) {
+          return {
+            verdict: "changes_requested" as const,
+            reasoning: "Needs work.",
+            findings: [
+              {
+                path: "src/foo.ts",
+                line: 12,
+                severity: "blocking" as const,
+                message: "Null check missing",
+              },
+            ],
+          };
+        }
+        return {
+          verdict: "approve" as const,
+          reasoning: "Looks good now.",
+          findings: [],
+        };
+      },
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      openPullRequestActivity: async () => {
+        openPrCalls += 1;
+        return { number: 50, url: "https://github.test/example/pr/50" };
+      },
+      postPullRequestReviewActivity: async (input) => {
+        postReviewVerdicts.push(input.verdict);
+        return { reviewId: postReviewVerdicts.length, droppedComments: 0 };
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_iterate",
+                identifier: "ENG-101",
+                title: "iterate path",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `ticket-test-${randomUUID()}`,
+        });
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 50, url: "https://github.test/example/pr/50" },
+        });
+      });
+    });
+
+    expect(openPrCalls).toBe(1);
+    expect(postReviewVerdicts).toEqual(["changes_requested", "approve"]);
+    expect(reviewerInputs.map((r) => r.round)).toEqual([0, 1]);
+    expect(coderInputs).toHaveLength(2);
+    expect(coderInputs[0].priorReview).toBeUndefined();
+    expect(coderInputs[1].priorReview).toBeDefined();
+    expect(coderInputs[1].priorReview?.prNumber).toBe(50);
+    expect(coderInputs[1].priorReview?.findings).toHaveLength(1);
+    expect(coderInputs[1].priorReview?.findings[0].severity).toBe("blocking");
+  }, 30_000);
+
+  it("review cap exhaustion: maxReviewRounds=2, every round changes_requested, throws ReviewRoundCapExhausted, ticket stays In Progress", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    let openPrCalls = 0;
+    const reviewRounds: number[] = [];
+    const postReviewVerdicts: string[] = [];
+    const syncedStateNames: string[] = [];
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => ({
+        featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+        testCommits: [
+          {
+            sha: "a".repeat(40),
+            path: "server/tests/integration/sample.test.ts",
+            description: "default",
+          },
+        ],
+      }),
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: input.priorReview ? "b".repeat(40) : "a".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (input: ReviewerInput) => {
+        reviewRounds.push(input.round);
+        return {
+          verdict: "changes_requested" as const,
+          reasoning: `Round ${input.round} still needs work.`,
+          findings: [
+            {
+              path: "src/foo.ts",
+              severity: "blocking" as const,
+              message: "Persistent issue",
+            },
+          ],
+        };
+      },
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      syncLinearTicketStateActivity: async (input) => {
+        syncedStateNames.push(input.stateName);
+      },
+      openPullRequestActivity: async () => {
+        openPrCalls += 1;
+        return { number: 60, url: "https://github.test/example/pr/60" };
+      },
+      postPullRequestReviewActivity: async (input) => {
+        postReviewVerdicts.push(input.verdict);
+        return { reviewId: postReviewVerdicts.length, droppedComments: 0 };
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_exhaust",
+                identifier: "ENG-102",
+                title: "cap exhaustion",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+              maxReviewRounds: 2,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `ticket-test-${randomUUID()}`,
+        });
+
+        const error = await handle.result().then(
+          () => {
+            throw new Error("expected workflow to fail with ReviewRoundCapExhausted");
+          },
+          (e: unknown) => e,
+        );
+        expect(error).toBeInstanceOf(WorkflowFailedError);
+        const cause = (error as WorkflowFailedError).cause;
+        expect(cause).toBeInstanceOf(ApplicationFailure);
+        const af = cause as ApplicationFailure;
+        expect(af.type).toBe(REVIEW_ROUND_CAP_EXHAUSTED_FAILURE_TYPE);
+        expect(af.nonRetryable).toBe(true);
+        expect(af.details).toBeDefined();
+        const detail = (af.details as unknown[])[0] as Record<string, unknown>;
+        expect(detail.verdict).toBe("changes_requested");
+        expect(detail.prNumber).toBe(60);
+        expect(detail.findings).toBeDefined();
+
+        expect(await handle.query(currentRoundQuery)).toBe(1);
+      });
+    });
+
+    expect(openPrCalls).toBe(1);
+    expect(reviewRounds).toEqual([0, 1]);
+    expect(postReviewVerdicts).toEqual(["changes_requested", "changes_requested"]);
+    // Linear ticket must remain In Progress on cap exhaustion (no transition to Done/Canceled).
+    expect(syncedStateNames).toEqual(["In Progress"]);
+  }, 30_000);
+
+  it("cancel between rounds: cancel after first post → no further coder/review invocations, cancelled terminal state", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const reviewRounds: number[] = [];
+    const coderInputs: CoderPhaseInput[] = [];
+    let postReviewCalls = 0;
+    let cancelSent = false;
+    const syncedStateNames: string[] = [];
+    let cancelHook: (() => Promise<void>) | undefined;
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => ({
+        featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+        testCommits: [
+          {
+            sha: "a".repeat(40),
+            path: "server/tests/integration/sample.test.ts",
+            description: "default",
+          },
+        ],
+      }),
+      runCoderPhase: async (input: CoderPhaseInput) => {
+        coderInputs.push(input);
+        return {
+          featureBranch: input.specOutput.featureBranch,
+          finalCommitSha: input.priorReview ? "b".repeat(40) : "a".repeat(40),
+          diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+          testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+        };
+      },
+      runReviewPhase: async (input: ReviewerInput) => {
+        reviewRounds.push(input.round);
+        return {
+          verdict: "changes_requested" as const,
+          reasoning: "Needs work.",
+          findings: [
+            {
+              path: "src/foo.ts",
+              severity: "blocking" as const,
+              message: "Null check missing",
+            },
+          ],
+        };
+      },
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      syncLinearTicketStateActivity: async (input) => {
+        syncedStateNames.push(input.stateName);
+      },
+      postPullRequestReviewActivity: async () => {
+        postReviewCalls += 1;
+        // After the round-0 post, fire the cancel signal to the workflow so the
+        // next iteration's top-of-loop cancel check transitions to cancelled
+        // before another coder dispatch.
+        if (postReviewCalls === 1 && cancelHook) {
+          await cancelHook();
+          cancelSent = true;
+        }
+        return { reviewId: postReviewCalls, droppedComments: 0 };
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_cancel_between",
+                identifier: "ENG-103",
+                title: "cancel between rounds",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `ticket-test-${randomUUID()}`,
+        });
+        cancelHook = async () => {
+          await handle.signal(cancelSignal);
+        };
+
+        await expect(handle.result()).resolves.toEqual({ status: "cancelled" });
+        expect(await handle.query(currentPhaseQuery)).toBe("cancelled");
+      });
+    });
+
+    expect(cancelSent).toBe(true);
+    expect(coderInputs).toHaveLength(1);
+    expect(reviewRounds).toEqual([0]);
+    expect(postReviewCalls).toBe(1);
+    expect(syncedStateNames).toEqual(["In Progress", "Canceled"]);
+  }, 30_000);
 });
 
 function buildBaseActivities(): TemporalWorkerActivities {
@@ -648,6 +1069,10 @@ function buildBaseActivities(): TemporalWorkerActivities {
     openPullRequestActivity: async () => ({
       number: 1,
       url: "https://github.test/example/pr/1",
+    }),
+    postPullRequestReviewActivity: async () => ({
+      reviewId: 1,
+      droppedComments: 0,
     }),
   };
 }

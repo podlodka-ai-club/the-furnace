@@ -623,6 +623,64 @@ describe("renderPrompt", () => {
     );
     expect(out).toBe("DESC=(no description)");
   });
+
+  it("renders empty prior-review section on round 0 (no priorReview)", () => {
+    const out = renderPrompt(
+      "BEFORE\n{{PRIOR_REVIEW_SECTION}}\nAFTER",
+      TICKET,
+      SPEC_OUTPUT,
+      "/workspace",
+    );
+    expect(out).toBe("BEFORE\n\nAFTER");
+    expect(out).not.toContain("Prior reviewer feedback");
+  });
+
+  it("renders prior-review section with all findings on follow-up rounds", () => {
+    const out = renderPrompt(
+      "BEFORE\n{{PRIOR_REVIEW_SECTION}}\nAFTER",
+      TICKET,
+      SPEC_OUTPUT,
+      "/workspace",
+      {
+        prNumber: 42,
+        reviewSummary: "Looks close but two issues remain.",
+        findings: [
+          {
+            path: "src/foo.ts",
+            line: 10,
+            severity: "blocking",
+            message: "Null check missing",
+          },
+          {
+            path: "src/bar.ts",
+            severity: "advisory",
+            message: "Consider extracting helper",
+          },
+        ],
+      },
+    );
+    expect(out).toContain("## Prior reviewer feedback");
+    expect(out).toContain("PR #42");
+    expect(out).toContain("Looks close but two issues remain.");
+    expect(out).toContain("[blocking] src/foo.ts:10 — Null check missing");
+    expect(out).toContain("[advisory] src/bar.ts — Consider extracting helper");
+  });
+
+  it("renders prior-review section with no-findings placeholder when findings array is empty", () => {
+    const out = renderPrompt(
+      "{{PRIOR_REVIEW_SECTION}}",
+      TICKET,
+      SPEC_OUTPUT,
+      "/workspace",
+      {
+        prNumber: 7,
+        reviewSummary: "Approved with notes.",
+        findings: [],
+      },
+    );
+    expect(out).toContain("## Prior reviewer feedback");
+    expect(out).toContain("(no findings)");
+  });
 });
 
 describe("buildStuckBody", () => {

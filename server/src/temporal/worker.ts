@@ -7,7 +7,10 @@ import type {
   SpecPhaseOutput,
 } from "../agents/contracts/index.js";
 import type { ResolvedTicket } from "../linear/types.js";
-import { openPullRequestActivity } from "./activities/github.js";
+import {
+  openPullRequestActivity,
+  postPullRequestReviewActivity,
+} from "./activities/github.js";
 import * as helloActivities from "./activities/hello.js";
 import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
@@ -17,6 +20,8 @@ import type { SyncLinearTicketStateInput } from "./activities/linear.js";
 import type {
   OpenPullRequestInput,
   OpenPullRequestResult,
+  PostPullRequestReviewInput,
+  PostPullRequestReviewResult,
 } from "./activities/github.js";
 import type {
   LaunchWorkerContainerInput,
@@ -46,6 +51,9 @@ export interface TemporalWorkerActivities {
   launchWorkerContainer(input: LaunchWorkerContainerInput): Promise<LaunchWorkerContainerResult>;
   validateRepoSlug(input: { slug: string }): Promise<void>;
   openPullRequestActivity(input: OpenPullRequestInput): Promise<OpenPullRequestResult>;
+  postPullRequestReviewActivity(
+    input: PostPullRequestReviewInput,
+  ): Promise<PostPullRequestReviewResult>;
 }
 
 const orchestratorOnlyActivities = {
@@ -53,6 +61,7 @@ const orchestratorOnlyActivities = {
   ...linearActivities,
   ...workerLauncherActivities,
   openPullRequestActivity,
+  postPullRequestReviewActivity,
 };
 
 const defaultActivities: TemporalWorkerActivities = {
@@ -138,7 +147,11 @@ export async function runTemporalWorker(): Promise<void> {
   const scheduleOutcome = await ensureLinearPollerSchedule(client.schedule);
   console.log(`Linear poller schedule ${scheduleOutcome} (${TEMPORAL_TASK_QUEUE})`);
 
-  const worker = await createTemporalWorker();
+  // Production: phase activities must run inside per-attempt containers, not
+  // on the orchestrator. Tests opt back in via `injectPhaseActivities: true`
+  // (the default for `createTemporalWorker`) when they need a single-process
+  // worker to claim everything.
+  const worker = await createTemporalWorker({ injectPhaseActivities: false });
   await worker.run();
 }
 

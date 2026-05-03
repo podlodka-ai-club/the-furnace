@@ -15,7 +15,7 @@ You are running inside a fresh, ephemeral container that has the target reposito
 The following test files are the contract you must satisfy. Treat them as **read-only**. Do not modify, delete, rename, or weaken them in any way:
 
 {{TEST_FILES}}
-
+{{PRIOR_REVIEW_SECTION}}
 ## How you finish
 
 You finish by calling **exactly one** of these three tools. Do not return prose without a tool call.

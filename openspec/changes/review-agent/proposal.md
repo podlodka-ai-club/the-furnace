@@ -10,7 +10,7 @@ A one-shot review gate that fails the workflow on `changes_requested` throws awa
 - On `changes_requested`: post the verdict + findings as a PR review (top-level body + file/line comments) on the existing PR, then re-enter the coder phase with `{ prNumber, reviewSummary, findings }` as additional input. The coder reads the PR review thread on the existing PR, addresses the findings, and pushes a new commit on the same feature branch. The reviewer then runs again over the new diff.
 - On `approve`: post the approving review on the PR and complete the workflow.
 - Bounded iteration: at most `MAX_REVIEW_ROUNDS` rounds per ticket (config; default `3`). Exceeding the cap fails the workflow with the last `changes_requested` payload preserved on the PR for human takeover.
-- Persist each review verdict in `reviews` as one row per round using persona `architect` for MVP compatibility with the existing schema.
+- Review-round audit lives in Temporal workflow history (activity inputs/outputs) and on the PR (one posted review per round); no orchestrator-side DB row is written. The drop-orchestrator-db change removed the `reviews` table; a future change (`vote-aggregator` or analytics) will pick a real datastore when one is needed.
 
 ## Capabilities
 
@@ -29,5 +29,4 @@ A one-shot review gate that fails the workflow on `changes_requested` throws awa
 - Depends on: `coder-agent`, `github-adapter`, `container-as-worker`, `data-model`.
 - Modifies: the coder phase input contract (gains optional `priorReview` for follow-up rounds) and the per-ticket workflow control flow.
 - New files: `server/src/agents/review/activity.ts`, `server/src/agents/review/prompt.md`.
-- Schema-compatible with `data-model`: one `reviews` row per round.
-- Defers advanced multi-persona fan-out and vote aggregation to Phase 6 (`persona-reviewers`, `vote-aggregator`).
+- No DB persistence: round audit relies on Temporal history + GitHub-side PR reviews. Defers persistence (and multi-persona vote aggregation) to `persona-reviewers` / `vote-aggregator` in Phase 6.

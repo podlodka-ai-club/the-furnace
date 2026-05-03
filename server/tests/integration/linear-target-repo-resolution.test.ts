@@ -160,6 +160,10 @@ function buildOrchestratorActivities(opts: {
       number: 1,
       url: "https://github.test/example/pr/1",
     }),
+    postPullRequestReviewActivity: async () => ({
+      reviewId: 1,
+      droppedComments: 0,
+    }),
     launchWorkerContainer: async (
       input: LaunchWorkerContainerInput,
     ): Promise<LaunchWorkerContainerResult> => {

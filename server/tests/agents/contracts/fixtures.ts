@@ -48,12 +48,21 @@ export const validReviewerInput = {
   finalCommitSha: validCoderPhaseOutput.finalCommitSha,
   diffStat: validCoderPhaseOutput.diffStat,
   testRunSummary: validCoderPhaseOutput.testRunSummary,
+  prNumber: 17,
+  round: 0,
 };
 
 export const validReviewResult = {
   verdict: "approve",
   reasoning: "All tests are green and contract coverage is complete.",
-  findings: ["Contracts are validated at activity boundaries."],
+  findings: [
+    {
+      path: "server/src/agents/contracts/index.ts",
+      line: 12,
+      severity: "advisory" as const,
+      message: "Contracts are validated at activity boundaries.",
+    },
+  ],
 };
 
 export const invalidSubTicketRef = {
@@ -104,5 +113,5 @@ export const invalidReviewerInput = {
 export const invalidReviewResult = {
   verdict: "maybe",
   reasoning: "",
-  findings: [""],
+  findings: [{ path: "", severity: "blocking", message: "" }],
 };
