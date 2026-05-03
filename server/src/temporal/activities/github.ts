@@ -224,7 +224,14 @@ export async function postPullRequestReviewActivity(
   const token = resolveToken(deps.resolveToken);
   const client = (deps.createClient ?? createGitHubClient)(token);
 
-  const event: ReviewEvent = validated.verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES";
+  // Single-identity setup: the same GitHub PAT that opens the PR also posts
+  // the review, and GitHub forbids APPROVE/REQUEST_CHANGES on your own PR.
+  // Always emit COMMENT — the verdict (`approve` / `changes_requested`) is
+  // preserved in the workflow output and the PR-body trailer for downstream
+  // consumers (vote-aggregator, auto-merge). When multi-persona review with
+  // a separate reviewer identity lands, that proposal can re-introduce the
+  // verdict→event mapping.
+  const event: ReviewEvent = "COMMENT";
   const comments: ReviewCommentInput[] = validated.comments.map((c) => ({
     path: c.path,
     body: c.body,

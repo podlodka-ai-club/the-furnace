@@ -10,7 +10,9 @@ import {
 import { readWorkerRepoPath } from "../../temporal/config.js";
 import {
   checkoutFeatureBranch,
+  computeChangedPaths,
   defaultRunCommand,
+  getDefaultBranch,
   type GitOpsContext,
   type RunCommand,
 } from "../shared/repo-ops.js";
@@ -54,10 +56,49 @@ export async function runReviewAgent(
   heartbeat({ phase: "review", action: "checkout", branch: validated.featureBranch });
   await checkoutFeatureBranch(ops, validated.featureBranch);
 
-  const promptTemplate = await loadPrompt();
-  const prompt = renderPrompt(promptTemplate, validated, repoPath);
+  const defaultBranch = await getDefaultBranch(ops);
+  const changedPaths = await computeChangedPaths(ops, `origin/${defaultBranch}`);
 
-  return await driveAgentLoop(agentClient, prompt, repoPath, validated);
+  const promptTemplate = await loadPrompt();
+  const prompt = renderPrompt(promptTemplate, validated, repoPath, changedPaths);
+
+  const raw = await driveAgentLoop(agentClient, prompt, repoPath, validated);
+  return reconcileFindingsWithDiff(raw, changedPaths);
+}
+
+// Drop findings whose `path` is not part of the PR diff and fold their text
+// into `reasoning` so the content survives. Without this, the reviewer agent
+// can ignore the prompt's "only cite paths in the diff" rule, and the GitHub
+// post-review activity then treats the resulting 422 as stale-line and drops
+// ALL inline comments — losing valid findings together with the bad ones.
+export function reconcileFindingsWithDiff(
+  result: ReviewResult,
+  changedPaths: ReadonlyArray<string>,
+): ReviewResult {
+  const allowed = new Set(changedPaths);
+  const kept: typeof result.findings = [];
+  const dropped: typeof result.findings = [];
+  for (const f of result.findings) {
+    if (allowed.has(f.path)) {
+      kept.push(f);
+    } else {
+      dropped.push(f);
+    }
+  }
+  if (dropped.length === 0) {
+    return result;
+  }
+  const droppedLines = dropped.map((f) => {
+    const loc = f.line !== undefined ? `${f.path}:${f.line}` : f.path;
+    return `- [${f.severity}] ${loc} — ${f.message}`;
+  });
+  const augmentedReasoning = [
+    result.reasoning.trim(),
+    "",
+    "**Out-of-diff notes** (cited paths are not part of this PR; folded into the body so the points are not lost):",
+    droppedLines.join("\n"),
+  ].join("\n");
+  return { ...result, reasoning: augmentedReasoning, findings: kept };
 }
 
 function parseInput(input: ReviewerInput): ReviewerInput {
@@ -142,9 +183,14 @@ export function renderPrompt(
   template: string,
   input: ReviewerInput,
   repoPath: string,
+  changedPaths: ReadonlyArray<string>,
 ): string {
   const diffStat = `${input.diffStat.filesChanged} files changed, +${input.diffStat.insertions}/-${input.diffStat.deletions}`;
   const testSummary = `${input.testRunSummary.passed}/${input.testRunSummary.total} tests passed (${input.testRunSummary.failed} failed) in ${input.testRunSummary.durationMs}ms`;
+  const changedPathsBlock =
+    changedPaths.length > 0
+      ? changedPaths.map((p) => `- ${p}`).join("\n")
+      : "(no paths reported by git diff — investigate with `git status` before submitting findings)";
   return template
     .replaceAll("{{TICKET_IDENTIFIER}}", input.ticket.identifier)
     .replaceAll("{{TICKET_TITLE}}", input.ticket.title)
@@ -158,7 +204,8 @@ export function renderPrompt(
     .replaceAll("{{PR_NUMBER}}", String(input.prNumber))
     .replaceAll("{{ROUND}}", String(input.round))
     .replaceAll("{{DIFF_STAT}}", diffStat)
-    .replaceAll("{{TEST_RUN_SUMMARY}}", testSummary);
+    .replaceAll("{{TEST_RUN_SUMMARY}}", testSummary)
+    .replaceAll("{{CHANGED_PATHS}}", changedPathsBlock);
 }
 
 async function loadDefaultPrompt(): Promise<string> {

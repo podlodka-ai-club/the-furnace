@@ -1,4 +1,10 @@
-## ADDED Requirements
+# single-review-with-feedback-loop Specification
+
+## Purpose
+
+Defines the single reviewer activity that runs after the coder phase pushes a green branch, emitting a stable verdict and structured findings the workflow uses to gate a bounded coder ↔ reviewer iteration loop on the existing pull request. Covers reviewer activity placement on the per-attempt container queue, SDK driver, structured verdict shape, input contract, prompt-injected PR changed paths, finding scoping, the trusted coder-reported test summary, and heartbeating.
+
+## Requirements
 
 ### Requirement: Review Activity Runs On Per-Attempt Container Queue
 
@@ -57,6 +63,38 @@ The review activity input SHALL include the ticket reference, the coder phase's 
 - **WHEN** the workflow invokes `runReviewPhase`
 - **THEN** the input MUST include `ticket`, `featureBranch`, `finalCommitSha`, `diffStat`, `testSummary`, `prNumber`, and `round`
 - **AND** the input MUST pass the canonical reviewer input schema validation
+
+### Requirement: Reviewer Prompt Includes PR Changed Paths
+
+After checking out the feature branch and before starting the SDK conversation, the review activity SHALL compute the repo-relative paths changed in the PR diff and render them into the reviewer prompt. The path list SHALL be computed from the merge-base style diff between the target repo default branch and `HEAD`, equivalent to `git diff --name-only origin/<defaultBranch>...HEAD`.
+
+#### Scenario: Changed paths rendered before SDK starts
+
+- **WHEN** `runReviewAgent` has checked out the feature branch
+- **THEN** it MUST resolve the target repo default branch from the local `origin` refs
+- **AND** it MUST compute changed paths with `git diff --name-only origin/<defaultBranch>...HEAD`
+- **AND** it MUST render those paths into the prompt before the SDK conversation starts
+
+#### Scenario: Empty changed-path list is explicit
+
+- **WHEN** the changed-path computation returns no paths
+- **THEN** the prompt MUST include an explicit no-paths placeholder instead of silently omitting the section
+
+### Requirement: Reviewer Findings Are Limited To PR Diff Paths
+
+Structured `findings[]` entries SHALL cite only repo-relative paths that appear in the PR changed-path list supplied to the reviewer prompt. Concerns about files outside the PR diff, files that should have changed but did not, or broader architectural issues SHALL be described in `reasoning` rather than emitted as structured findings.
+
+#### Scenario: Finding path appears in changed-path list
+
+- **WHEN** the reviewer emits a `findings[]` entry
+- **THEN** `finding.path` MUST exactly match one path from the changed-path prompt section
+- **AND** the finding MAY include `line` only when that line is part of the PR diff for that file
+
+#### Scenario: Off-diff concern captured in reasoning
+
+- **WHEN** the reviewer identifies a concern about a file outside the changed-path list
+- **THEN** the reviewer MUST describe that concern in `reasoning`
+- **AND** it MUST NOT emit a structured `findings[]` entry for that off-diff file
 
 ### Requirement: Reviewer Trusts Coder-Reported Test Summary
 

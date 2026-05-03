@@ -165,6 +165,11 @@ describe("phase activities contract boundaries", () => {
           c === "npm" && a[0] === "test"
             ? ok("Tests  3 passed (3)\n")
             : null,
+        // hasWorkingTreeChanges: status --porcelain (dirty)
+        (c, a) =>
+          c === "git" && a[0] === "status" && a[1] === "--porcelain"
+            ? ok(" M src/foo.ts\n")
+            : null,
         // commitAll: git add --all
         (c, a) => (c === "git" && a[0] === "add" ? ok() : null),
         // commitAll: git commit
@@ -272,6 +277,14 @@ describe("phase activities contract boundaries", () => {
       (c, a) => (c === "git" && a[0] === "checkout" ? ok() : null),
       // checkoutFeatureBranch: git status --porcelain (clean)
       (c, a) => (c === "git" && a[0] === "status" ? ok("") : null),
+      // getDefaultBranch: git symbolic-ref refs/remotes/origin/HEAD → refs/remotes/origin/main
+      (c, a) =>
+        c === "git" && a[0] === "symbolic-ref" ? ok("refs/remotes/origin/main\n") : null,
+      // computeChangedPaths: git diff --name-only origin/main...HEAD
+      (c, a) =>
+        c === "git" && a[0] === "diff" && a[1] === "--name-only"
+          ? ok("server/src/foo.ts\nserver/src/bar.ts\n")
+          : null,
     ];
     let stepIdx = 0;
     const runCommand: RunCommand = async (command, args) => {

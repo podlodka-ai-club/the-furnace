@@ -58,7 +58,7 @@ export async function findOpenPR(
   return { number: first.number, url: first.html_url };
 }
 
-export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES";
+export type ReviewEvent = "COMMENT";
 
 export interface ReviewCommentInput {
   path: string;
@@ -139,8 +139,9 @@ export function classifyGitHubError(err: unknown): ClassifiedGitHubError {
       return { kind: "duplicate", status, original: err };
     }
     if (
-      (message.includes("line") || message.includes("position")) &&
-      (message.includes("diff") || message.includes("not part") || message.includes("invalid"))
+      ((message.includes("line") || message.includes("position")) &&
+        (message.includes("diff") || message.includes("not part") || message.includes("invalid"))) ||
+      message.includes("path could not be resolved")
     ) {
       return { kind: "staleLine", status, original: err };
     }

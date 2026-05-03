@@ -17,20 +17,20 @@ The system SHALL expose a `postPullRequestReviewActivity` registered on the orch
 - **AND** `verdict` MUST be either `"approve"` or `"changes_requested"`
 - **AND** each entry of `comments` MUST be `{ path: string; line?: number; body: string }`
 
-### Requirement: Activity Posts Review Via GitHub Reviews API
+### Requirement: Activity Posts Comment Review Via GitHub Reviews API
 
-The activity SHALL call `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews` resolving `owner` and `repo` from the repo registry keyed by `targetRepoSlug` via the existing `loadRepoSlugRegistry()` / `findRegistryEntry()` helpers. The `event` field SHALL be `APPROVE` when verdict is `"approve"` and `REQUEST_CHANGES` when verdict is `"changes_requested"`. The supplied `body` SHALL be passed through as the top-level review body. Per-file/line `comments[]` entries SHALL be passed through as inline review comments.
+The activity SHALL call `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews` resolving `owner` and `repo` from the repo registry keyed by `targetRepoSlug` via the existing `loadRepoSlugRegistry()` / `findRegistryEntry()` helpers. The `event` field SHALL always be `COMMENT` in the current single-identity setup, regardless of whether the supplied semantic verdict is `"approve"` or `"changes_requested"`. The supplied `body` SHALL be passed through as the top-level review body. Per-file/line `comments[]` entries SHALL be passed through as inline review comments.
 
-#### Scenario: Approve verdict maps to APPROVE event
+#### Scenario: Approve verdict maps to COMMENT event
 
 - **WHEN** the activity executes with `verdict: "approve"`
-- **THEN** the `event` field of the GitHub Reviews API request MUST be `APPROVE`
+- **THEN** the `event` field of the GitHub Reviews API request MUST be `COMMENT`
 - **AND** the request body MUST include the supplied top-level `body`
 
-#### Scenario: Changes-requested verdict maps to REQUEST_CHANGES event
+#### Scenario: Changes-requested verdict maps to COMMENT event
 
 - **WHEN** the activity executes with `verdict: "changes_requested"`
-- **THEN** the `event` field of the GitHub Reviews API request MUST be `REQUEST_CHANGES`
+- **THEN** the `event` field of the GitHub Reviews API request MUST be `COMMENT`
 - **AND** the request body MUST include the supplied top-level `body`
 
 #### Scenario: Inline comments forwarded
@@ -43,9 +43,9 @@ The activity SHALL call `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews`
 - **WHEN** the activity executes with a `targetRepoSlug` not present in the registry
 - **THEN** it MUST throw a non-retryable `ApplicationFailure`
 
-### Requirement: Stale-Line 422 Falls Back To Top-Level Review
+### Requirement: Invalid Inline-Comment 422 Falls Back To Top-Level Review
 
-When GitHub returns `422 Validation Failed` because one or more `comments[].line` values are not present in the PR diff, the activity SHALL retry the call once with `comments: []` so the verdict and top-level body still post on the PR. The activity SHALL log a warning identifying the dropped inline comments.
+When GitHub returns `422 Validation Failed` because one or more inline comments cannot be placed on the PR diff, the activity SHALL retry the call once with `comments: []` so the top-level review body still posts on the PR. This includes stale line or position errors and path-resolution errors such as `"Path could not be resolved"`. The activity SHALL log a warning identifying the dropped inline comments.
 
 #### Scenario: Stale line numbers fall back to top-level review
 
@@ -54,9 +54,16 @@ When GitHub returns `422 Validation Failed` because one or more `comments[].line
 - **AND** if the retry succeeds, the activity MUST return successfully
 - **AND** the activity MUST log a warning naming the dropped inline comments
 
+#### Scenario: Unresolved comment paths fall back to top-level review
+
+- **WHEN** the initial `POST` to `/pulls/{pull_number}/reviews` returns `422` because one or more comment paths could not be resolved
+- **THEN** the activity MUST retry once with `comments: []`
+- **AND** if the retry succeeds, the activity MUST return successfully
+- **AND** the returned result MUST report the number of dropped inline comments
+
 #### Scenario: 422 from other validation causes is non-retryable
 
-- **WHEN** the initial `POST` returns `422` for a reason unrelated to `comments[].line`
+- **WHEN** the initial `POST` returns `422` for a reason unrelated to placing inline comments on the PR diff
 - **THEN** the activity MUST throw a non-retryable `ApplicationFailure`
 
 ### Requirement: Auth And Missing PR Failures Are Non-Retryable

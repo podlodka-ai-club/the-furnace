@@ -167,6 +167,11 @@ function happyPathSteps(): ScriptedStep[] {
       match: (c, a) => c === "npm" && a[0] === "test",
       result: ok(PASSING_RUN_OUT),
     },
+    // hasWorkingTreeChanges: status --porcelain (dirty → has changes)
+    {
+      match: (c, a) => c === "git" && a[0] === "status" && a[1] === "--porcelain",
+      result: ok(" M src/server.js\n"),
+    },
     // commitAll: git add --all
     { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
     // commitAll: git commit
@@ -264,6 +269,11 @@ describe("runCoderPhase", () => {
         match: (c, a) => c === "npm" && a[0] === "test",
         result: ok(PASSING_RUN_OUT),
       },
+      // hasWorkingTreeChanges: dirty
+      {
+        match: (c, a) => c === "git" && a[0] === "status" && a[1] === "--porcelain",
+        result: ok(" M src/foo.ts\n"),
+      },
       // commitAll
       { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
       { match: (c, a) => c === "git" && a[0] === "commit", result: ok() },
@@ -322,6 +332,11 @@ describe("runCoderPhase", () => {
         match: (c, a) => c === "npm" && a[0] === "test",
         result: ok(PASSING_RUN_OUT),
       },
+      // hasWorkingTreeChanges: dirty
+      {
+        match: (c, a) => c === "git" && a[0] === "status" && a[1] === "--porcelain",
+        result: ok(" M src/foo.ts\n"),
+      },
       { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
       { match: (c, a) => c === "git" && a[0] === "commit", result: ok() },
       {
@@ -347,6 +362,91 @@ describe("runCoderPhase", () => {
     expect(output.finalCommitSha).toBe("b".repeat(40));
     expect(agentCalls[1].correctiveMessage).toContain("tests/feature-y.test.ts");
     expect(agentCalls[1].correctiveMessage).toMatch(/modified one or more spec test files/i);
+  });
+
+  it("10.3.1 empty-diff submission: corrective sent, second submission with real changes succeeds", async () => {
+    const { client, calls: agentCalls } = makeStubAgentClient([
+      { type: "submit_implementation", input: { summary: "first try" } },
+      { type: "submit_implementation", input: { summary: "second try" } },
+    ]);
+
+    const { run } = makeScriptedRunCommand([
+      // checkoutFeatureBranch
+      { match: (c, a) => c === "git" && a[0] === "fetch", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "checkout", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "status", result: ok("") },
+      // preAgentSha
+      {
+        match: (c, a) => c === "git" && a[0] === "rev-parse",
+        result: ok(`${"a".repeat(40)}\n`),
+      },
+      // First submission: diffPathsTouched clean, tests pass, but working tree is empty
+      {
+        match: (c, a) => c === "git" && a[0] === "diff" && a[1] === "--name-only",
+        result: ok(""),
+      },
+      {
+        match: (c, a) => c === "npm" && a[0] === "test",
+        result: ok(PASSING_RUN_OUT),
+      },
+      // hasWorkingTreeChanges: empty → corrective nudge
+      {
+        match: (c, a) => c === "git" && a[0] === "status" && a[1] === "--porcelain",
+        result: ok(""),
+      },
+      // Second submission: diffPathsTouched clean, tests pass, working tree dirty
+      {
+        match: (c, a) => c === "git" && a[0] === "diff" && a[1] === "--name-only",
+        result: ok(""),
+      },
+      {
+        match: (c, a) => c === "npm" && a[0] === "test",
+        result: ok(PASSING_RUN_OUT),
+      },
+      {
+        match: (c, a) => c === "git" && a[0] === "status" && a[1] === "--porcelain",
+        result: ok(" M src/foo.ts\n"),
+      },
+      { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "commit", result: ok() },
+      {
+        match: (c, a) => c === "git" && a[0] === "rev-parse",
+        result: ok(`${"b".repeat(40)}\n`),
+      },
+      { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
+      {
+        match: (c, a) => c === "git" && a[0] === "diff" && a[1] === "--shortstat",
+        result: ok(" 1 file changed, 1 insertion(+)\n"),
+      },
+    ]);
+
+    const priorReview = {
+      prNumber: 42,
+      reviewSummary: "Edge case missing.",
+      findings: [
+        {
+          path: "src/foo.ts",
+          line: 12,
+          severity: "blocking" as const,
+          message: "Handle empty input.",
+        },
+      ],
+    };
+
+    const output = await runCoderPhase(
+      { ticket: TICKET, specOutput: SPEC_OUTPUT, priorReview },
+      makeBaseDeps({
+        agentClient: client,
+        runCommand: run,
+        resolveRepoPath: () => repoPath,
+      }),
+    );
+
+    expect(output.finalCommitSha).toBe("b".repeat(40));
+    expect(agentCalls).toHaveLength(2);
+    expect(agentCalls[1].correctiveMessage).toMatch(/working tree is identical to HEAD/i);
+    expect(agentCalls[1].correctiveMessage).toContain("src/foo.ts:12");
+    expect(agentCalls[1].correctiveMessage).toContain("Handle empty input.");
   });
 
   it("10.4 prose-only correction budget exhaustion: retryable error after budget", async () => {
@@ -568,12 +668,15 @@ describe("runCoderPhase", () => {
       { type: "submit_implementation", input: { summary: "fixed it" } },
     ]);
 
-    // Mirror happyPathSteps but make the post-commit `git rev-parse HEAD` (the
-    // 9th scripted step, used by commitAll for finalCommitSha) return a value
-    // that fails commitShaSchema's 40-char-hex regex. coderPhaseOutputSchema
-    // .parse must throw rather than return a malformed payload.
+    // Mirror happyPathSteps but make the post-commit `git rev-parse HEAD`
+    // (used by commitAll for finalCommitSha) return a value that fails
+    // commitShaSchema's 40-char-hex regex. coderPhaseOutputSchema.parse must
+    // throw rather than return a malformed payload.
     const steps = happyPathSteps();
-    steps[8] = {
+    const finalShaIdx = steps.findIndex(
+      (s, i) => i > 6 && s.match("git", ["rev-parse", "HEAD"]),
+    );
+    steps[finalShaIdx] = {
       match: (c, a) => c === "git" && a[0] === "rev-parse",
       result: ok("not-a-sha\n"),
     };

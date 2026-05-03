@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  reconcileFindingsWithDiff,
   runReviewAgent,
   type RunReviewAgentDeps,
 } from "../../../src/agents/review/activity.js";
@@ -131,5 +132,66 @@ describe("runReviewAgent — pre-session checkout", () => {
       }),
     ).rejects.toThrow(/git fetch/);
     expect(stub.startCount()).toBe(0);
+  });
+});
+
+describe("reconcileFindingsWithDiff", () => {
+  it("returns the result unchanged when every finding's path is in the diff", () => {
+    const result: ReviewResult = {
+      verdict: "changes_requested",
+      reasoning: "One bug remains.",
+      findings: [
+        { path: "src/foo.ts", line: 12, severity: "blocking", message: "off by one" },
+        { path: "src/bar.ts", severity: "advisory", message: "naming nit" },
+      ],
+    };
+    const out = reconcileFindingsWithDiff(result, ["src/foo.ts", "src/bar.ts"]);
+    expect(out).toBe(result);
+  });
+
+  it("drops findings whose path is not in the diff and folds them into reasoning", () => {
+    const result: ReviewResult = {
+      verdict: "changes_requested",
+      reasoning: "Coverage gap in handler.",
+      findings: [
+        { path: "src/foo.ts", line: 12, severity: "blocking", message: "off by one" },
+        {
+          path: "tests/old-suite.ts",
+          line: 3,
+          severity: "blocking",
+          message: "reviewer thought this should change",
+        },
+        { path: "docs/missing.md", severity: "advisory", message: "docs untouched" },
+      ],
+    };
+    const out = reconcileFindingsWithDiff(result, ["src/foo.ts"]);
+
+    expect(out.verdict).toBe("changes_requested");
+    expect(out.findings).toEqual([
+      { path: "src/foo.ts", line: 12, severity: "blocking", message: "off by one" },
+    ]);
+    expect(out.reasoning).toContain("Coverage gap in handler.");
+    expect(out.reasoning).toContain("Out-of-diff notes");
+    expect(out.reasoning).toContain("tests/old-suite.ts:3");
+    expect(out.reasoning).toContain("docs/missing.md");
+    expect(out.reasoning).toContain("reviewer thought this should change");
+    expect(out.reasoning).toContain("docs untouched");
+    // Severity tag preserved.
+    expect(out.reasoning).toContain("[blocking]");
+    expect(out.reasoning).toContain("[advisory]");
+  });
+
+  it("preserves verdict when all findings are dropped (caller decides what to do)", () => {
+    const result: ReviewResult = {
+      verdict: "changes_requested",
+      reasoning: "Bad shape.",
+      findings: [
+        { path: "src/gone.ts", line: 1, severity: "blocking", message: "this file is not in diff" },
+      ],
+    };
+    const out = reconcileFindingsWithDiff(result, ["src/foo.ts"]);
+    expect(out.findings).toEqual([]);
+    expect(out.verdict).toBe("changes_requested");
+    expect(out.reasoning).toContain("src/gone.ts:1");
   });
 });

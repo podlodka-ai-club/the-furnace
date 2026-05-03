@@ -44,7 +44,7 @@ function makeMockClient(opts: { createReviewImpl?: (...args: unknown[]) => unkno
 }
 
 describe("postPullRequestReviewActivity", () => {
-  it("maps verdict 'approve' to event APPROVE and forwards comments", async () => {
+  it("posts the review with event COMMENT regardless of verdict and forwards comments", async () => {
     const mock = makeMockClient({
       createReviewImpl: async () => ({ data: { id: 99 } }),
     });
@@ -72,7 +72,7 @@ describe("postPullRequestReviewActivity", () => {
         owner: "Acme",
         repo: "service",
         pull_number: 17,
-        event: "APPROVE",
+        event: "COMMENT",
         body: "All good.",
         comments: [
           { path: "src/foo.ts", body: "[advisory] Consider rename", line: 12, side: "RIGHT" },
@@ -82,7 +82,7 @@ describe("postPullRequestReviewActivity", () => {
     );
   });
 
-  it("maps verdict 'changes_requested' to event REQUEST_CHANGES", async () => {
+  it("uses event COMMENT for verdict 'changes_requested' as well", async () => {
     const mock = makeMockClient({
       createReviewImpl: async () => ({ data: { id: 100 } }),
     });
@@ -98,7 +98,7 @@ describe("postPullRequestReviewActivity", () => {
 
     expect(mock.pullsCreateReview).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: "REQUEST_CHANGES",
+        event: "COMMENT",
         body: "Issues remain.",
       }),
     );
@@ -136,6 +136,46 @@ describe("postPullRequestReviewActivity", () => {
     );
 
     expect(result).toEqual({ reviewId: 222, droppedComments: 2 });
+    expect(mock.pullsCreateReview).toHaveBeenCalledTimes(2);
+    const secondCall = mock.pullsCreateReview.mock.calls[1][0] as { comments: unknown[] };
+    expect(secondCall.comments).toEqual([]);
+  });
+
+  it("retries with empty comments when GitHub returns 422 \"Path could not be resolved\"", async () => {
+    const pathErr = Object.assign(
+      new Error(
+        'Unprocessable Entity: "Path could not be resolved, Path could not be resolved, and Path could not be resolved"',
+      ),
+      { status: 422 },
+    );
+    let calls = 0;
+    const mock = makeMockClient({
+      createReviewImpl: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw pathErr;
+        }
+        return { data: { id: 333 } };
+      },
+    });
+
+    const result = await postPullRequestReviewActivity(
+      makeInput({
+        verdict: "changes_requested",
+        comments: [
+          { path: "renamed/old.ts", line: 1, body: "[blocking] Path gone" },
+          { path: "deleted.ts", line: 2, body: "[blocking] File deleted" },
+          { path: "moved/new.ts", body: "[advisory] Path moved" },
+        ],
+      }),
+      {
+        createClient: () => mock.client,
+        resolveToken: () => "token",
+        loadRegistry: async () => makeRegistry(),
+      },
+    );
+
+    expect(result).toEqual({ reviewId: 333, droppedComments: 3 });
     expect(mock.pullsCreateReview).toHaveBeenCalledTimes(2);
     const secondCall = mock.pullsCreateReview.mock.calls[1][0] as { comments: unknown[] };
     expect(secondCall.comments).toEqual([]);

@@ -47,3 +47,28 @@ The coder activity SHALL NOT call the GitHub API from inside the per-attempt con
 - **WHEN** the coder activity runs on a follow-up round
 - **THEN** it MUST read the prior review only from `input.priorReview`
 - **AND** it MUST NOT fetch PR review comments via the GitHub API
+
+### Requirement: Empty-Diff Submissions Are Corrected Before Commit
+
+After `submit_implementation` returns, the activity SHALL verify that the working tree contains changes before attempting to commit. If tests pass but `git status --porcelain` reports no modified, staged, or untracked files, the activity SHALL send a corrective message within the same SDK conversation instead of invoking `git commit`.
+
+#### Scenario: Passing submission has working-tree changes
+
+- **WHEN** the activity has verified tests pass and protected spec test files were not modified
+- **AND** `git status --porcelain` reports at least one working-tree change
+- **THEN** the activity MUST proceed to commit and push
+
+#### Scenario: Passing submission has no working-tree changes
+
+- **WHEN** the agent calls `submit_implementation`
+- **AND** the activity verifies tests pass
+- **AND** `git status --porcelain` reports an empty working tree
+- **THEN** the activity MUST send a corrective message explaining that no files were changed
+- **AND** it MUST request another iteration within the same SDK conversation, sharing the existing correction budget used for prose-only, test-failure, and protected-test-file corrections
+- **AND** if the budget is exhausted, the activity MUST throw a retryable error
+
+#### Scenario: Empty follow-up submission includes prior review context
+
+- **WHEN** the empty working-tree submission occurs with `priorReview` present
+- **THEN** the corrective message MUST identify that the prior review still requires action
+- **AND** it MUST include either the blocking findings or the prior review summary so the agent can make a real follow-up edit or escalate a design question

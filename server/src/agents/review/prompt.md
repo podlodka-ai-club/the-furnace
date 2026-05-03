@@ -19,6 +19,12 @@ You are running inside a fresh, ephemeral container that has the target reposito
 - Diff stat: {{DIFF_STAT}}
 - Test run summary (already verified green by the coder phase): {{TEST_RUN_SUMMARY}}
 
+## Files changed in this PR
+
+These are the **only** repo-relative paths that exist in the PR diff. GitHub will reject any inline finding whose `path` is not in this list. Treat this list as authoritative — if a path you want to comment on is not here, it is **not** part of the diff and must go in `reasoning` instead of `findings`.
+
+{{CHANGED_PATHS}}
+
 ## How to investigate
 
 Use the `Read`, `Glob`, and `Grep` tools to:
@@ -51,8 +57,8 @@ Choose `"changes_requested"` when at least one issue is severe enough that the P
 
 ### How to write findings
 
-- `path`: the repo-relative path of the file the finding refers to (e.g. `server/src/agents/review/activity.ts`).
-- `line`: optional 1-based line number in the file *as it exists on disk after the coder's commit*. If the line you want to comment on is not part of the diff, omit `line` so the comment becomes top-level rather than inline.
+- `path`: the repo-relative path of the file the finding refers to (e.g. `server/src/agents/review/activity.ts`). **Must exactly match one of the paths listed under "Files changed in this PR".** If your concern is about a file that is not in that list (e.g. an unchanged caller, a file the diff *should* have touched but didn't), put that observation in `reasoning` instead — do **not** invent a `findings` entry for it.
+- `line`: optional 1-based line number in the file *as it exists on disk after the coder's commit*. Only set `line` when the line is part of the diff hunk for that file; otherwise omit it so the comment becomes top-level rather than inline. Stale or out-of-diff line numbers cause GitHub to drop all of your inline comments.
 - `severity`: `"blocking"` for must-fix, `"advisory"` for suggestions.
 - `message`: 1–3 sentences. Be concrete: reference the exact symbol, branch, or condition. The coder agent will read your findings on the next round and try to address them; vague comments produce vague fixes.
 
@@ -60,6 +66,7 @@ Choose `"changes_requested"` when at least one issue is severe enough that the P
 
 - **Trust the test summary.** Do not invoke `npm test`, `vitest`, `jest`, or any test runner. Re-running tests is out of scope; the coder phase already verified green.
 - **Ground every finding in the current SHA.** Do not cite line numbers from a prior diff or from a file that no longer exists. Read the file before citing it.
+- **Only cite paths in the diff.** Every `findings[].path` must appear verbatim in the "Files changed in this PR" list above. Concerns about files outside that list belong in `reasoning`, not `findings`.
 - **Do not modify the working tree.** Read-only tools only.
 - **Be decisive.** If you are uncertain, lean toward `changes_requested` with a specific blocking finding rather than approving with reservations. The pipeline will run another coder round.
 

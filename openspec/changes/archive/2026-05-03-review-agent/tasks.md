@@ -17,8 +17,8 @@
 
 - [x] 3.1 Add `postPullRequestReviewActivity` in `server/src/temporal/activities/github.ts` accepting `{ targetRepoSlug, prNumber, verdict, body, comments: { path; line?; body }[] }`.
 - [x] 3.2 Resolve `owner`/`repo` via `loadRepoSlugRegistry()` / `findRegistryEntry()`; resolve `TARGET_REPO_GITHUB_TOKEN` via the same lazy config helper used by `openPullRequestActivity`; throw non-retryable `ApplicationFailure` on missing token or unknown slug.
-- [x] 3.3 Call `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews` with `event: APPROVE` (verdict approve) or `event: REQUEST_CHANGES` (verdict changes_requested); forward `comments[]` as inline review comments preserving `path`, optional `line`, and `body`.
-- [x] 3.4 Implement the 422-stale-line fallback: detect 422 caused by `comments[].line` not in diff, retry once with `comments: []`, log a warning naming the dropped comments; classify other 422s as non-retryable.
+- [x] 3.3 Call `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews` with `event: COMMENT` for both semantic verdicts; forward `comments[]` as inline review comments preserving `path`, optional `line`, and `body`.
+- [x] 3.4 Implement the invalid-inline-comment 422 fallback: detect 422 caused by stale lines/positions or unresolved paths, retry once with `comments: []`, log a warning naming the dropped comments; classify other 422s as non-retryable.
 - [x] 3.5 Classify error responses: 401/403 → non-retryable `ApplicationFailure` `type: "GitHubAuthFailed"`; 404 on the supplied `prNumber` → non-retryable `type: "GitHubPullRequestMissing"`; 5xx and network errors → retryable.
 - [x] 3.6 Register `postPullRequestReviewActivity` on the orchestrator worker only; ensure it is NOT registered on per-attempt container workers.
 
@@ -44,8 +44,8 @@
 
 - [x] 6.1 Unit tests for `reviewResultSchema`: valid `approve` (advisory-only findings allowed), valid `changes_requested` (≥1 blocking finding required by spec wording), invalid shapes rejected.
 - [x] 6.2 Unit tests for `coderPhaseInputSchema`: round-0 input without `priorReview` parses; follow-up input with `priorReview` parses; malformed `priorReview` rejected.
-- [x] 6.3 Unit tests for `postPullRequestReviewActivity`: verdict mapping (`approve` → `APPROVE`, `changes_requested` → `REQUEST_CHANGES`); comment forwarding; 422-stale-line fallback path; 401/403/404/5xx classification; missing token; unknown slug.
-- [x] 6.4 Integration test (real Temporal per `CLAUDE.md`) for the round loop happy path: round 0 coder green → PR opened → review approve → workflow succeeded; assert `openPullRequestActivity` called exactly once and `postPullRequestReviewActivity` called once with `event: APPROVE`.
+- [x] 6.3 Unit tests for `postPullRequestReviewActivity`: both verdicts post GitHub `COMMENT`; comment forwarding; invalid-inline-comment 422 fallback path; 401/403/404/5xx classification; missing token; unknown slug.
+- [x] 6.4 Integration test (real Temporal per `CLAUDE.md`) for the round loop happy path: round 0 coder green → PR opened → review approve → workflow succeeded; assert `openPullRequestActivity` called exactly once and `postPullRequestReviewActivity` called once.
 - [x] 6.5 Integration test for the iterate path: round 0 review `changes_requested` → coder re-invoked with `priorReview` populated → round 1 review `approve` → workflow succeeded; assert exactly two `runReviewPhase` invocations with `round` 0 and 1 in their inputs, and the existing PR is reused (no second `openPullRequestActivity` call).
 - [x] 6.6 Integration test for cap exhaustion: configure `MAX_REVIEW_ROUNDS = 2`, force `changes_requested` on every round; assert `ReviewRoundCapExhausted` non-retryable failure carrying the last review payload, PR remains open, ticket remains `In Progress`, exactly two `runReviewPhase` invocations observed.
 - [x] 6.7 Integration test for cancel between rounds: signal `cancel` after a `changes_requested` post and before the next coder dispatch; assert no further `runCoderPhase` or `runReviewPhase` invocations and the workflow reaches the cancelled terminal state.
@@ -55,3 +55,10 @@
 - [x] 7.1 Run `TEMPORAL_TASK_QUEUE=local-test npm test` from the repo root; resolve any failures.
 - [x] 7.2 Update `openspec/roadmap.md` if this change graduates the review phase from Phase 5 stub to real implementation.
 - [x] 7.3 `openspec validate review-agent --strict` passes with zero issues.
+
+## 8. Review-Loop Hardening Follow-Up
+
+- [x] 8.1 Compute reviewer changed paths from `origin/<defaultBranch>...HEAD` and render them into the review prompt so structured findings cite only PR-diff paths.
+- [x] 8.2 Reject coder `submit_implementation` calls that pass tests but leave the working tree identical to `HEAD`, sharing the existing correction budget.
+- [x] 8.3 Post PR reviews with GitHub `event: COMMENT` for both semantic verdicts in the single-identity setup.
+- [x] 8.4 Treat unresolved inline-comment paths (`"Path could not be resolved"`) like stale lines by retrying the PR review once with no inline comments.

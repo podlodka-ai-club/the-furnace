@@ -205,6 +205,46 @@ export async function checkoutFeatureBranch(
   }
 }
 
+// Returns repo-relative paths changed between `baseRef`'s merge base and HEAD.
+// Mirrors what GitHub considers the PR diff (`base...head`). Used by the review
+// activity to give the agent an authoritative list of paths it may cite.
+export async function computeChangedPaths(
+  ctx: GitOpsContext,
+  baseRef: string,
+): Promise<string[]> {
+  const result = await ctx.run(
+    "git",
+    ["diff", "--name-only", `${baseRef}...HEAD`],
+    { cwd: ctx.repoRoot },
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git diff --name-only ${baseRef}...HEAD failed: ${result.stderr.trim() || result.stdout.trim()}`,
+    );
+  }
+  const paths: string[] = [];
+  for (const line of result.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) {
+      paths.push(trimmed);
+    }
+  }
+  return paths;
+}
+
+// True if `git status --porcelain` reports anything (modified, untracked, or
+// staged). Used by the coder activity to detect "agent submitted but didn't
+// actually change anything" before `git commit` produces a fatal error.
+export async function hasWorkingTreeChanges(ctx: GitOpsContext): Promise<boolean> {
+  const result = await ctx.run("git", ["status", "--porcelain"], { cwd: ctx.repoRoot });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git status --porcelain failed: ${result.stderr.trim() || result.stdout.trim()}`,
+    );
+  }
+  return result.stdout.trim().length > 0;
+}
+
 // Returns the subset of `paths` modified between `basisRef` and HEAD (after
 // staging the agent's working-tree changes). Used by the coder activity to
 // reject submissions that modified spec test files.

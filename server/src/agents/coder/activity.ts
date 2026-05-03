@@ -31,6 +31,7 @@ import {
   commitAll,
   defaultRunCommand,
   diffPathsTouched,
+  hasWorkingTreeChanges,
   pushExistingBranch,
   resolveTestCommand,
   type GitOpsContext,
@@ -298,7 +299,27 @@ async function handleSubmitImplementation(
     return { kind: "continue", decision: nextDecision, corrections: corrections + 1 };
   }
 
-  // 4. Commit and push.
+  // 4. Empty-diff guard: tests passed but the working tree might be identical
+  // to HEAD (e.g. the agent re-submitted on a correction round without making
+  // any new edits, or reverted its own changes). `commitAll` would fail with
+  // a fatal "nothing to commit" — instead, nudge the agent so it actually
+  // addresses the upstream feedback.
+  heartbeat({ phase: "coder", action: "diff_check", ticketId: ctx.ticket.id });
+  const hasChanges = await hasWorkingTreeChanges(ops);
+  if (!hasChanges) {
+    if (corrections >= ctx.correctionBudget) {
+      throw ApplicationFailure.create({
+        message: `Coder agent exhausted correction budget (${ctx.correctionBudget}); submitted with no working-tree changes`,
+        type: CODER_FAILURE_TYPES.toolBudgetExhausted,
+        nonRetryable: false,
+      });
+    }
+    const nudge = buildEmptyDiffNudge(ctx.priorReview);
+    const nextDecision = await session.next(nudge);
+    return { kind: "continue", decision: nextDecision, corrections: corrections + 1 };
+  }
+
+  // 5. Commit and push.
   heartbeat({ phase: "coder", action: "commit", ticketId: ctx.ticket.id });
   const subject = `feat(coder): make spec tests green for ${ctx.ticket.identifier}`;
   const finalCommitSha = await commitAll(ops, {
@@ -405,6 +426,33 @@ function buildTestFileTouchedNudge(paths: ReadonlyArray<string>): string {
     "Your submission modified one or more spec test files. Revert those changes and edit only production code.",
     "Modified test paths:",
     list,
+  ].join("\n\n");
+}
+
+function buildEmptyDiffNudge(priorReview: PriorReview | undefined): string {
+  const base =
+    "You called submit_implementation but the working tree is identical to HEAD — no files were actually changed. Tests pass only because the prior commit already made them green.";
+  if (!priorReview) {
+    return [
+      base,
+      "Apply the edits required to address this round's intent, then call submit_implementation again. If you believe no code change is needed, call report_design_question to escalate.",
+    ].join("\n\n");
+  }
+  const blockers = priorReview.findings
+    .filter((f) => f.severity === "blocking")
+    .map((f) => {
+      const loc = f.line !== undefined ? `${f.path}:${f.line}` : f.path;
+      return `- ${loc} — ${f.message}`;
+    });
+  const blockerBlock =
+    blockers.length > 0
+      ? `Blocking findings from PR #${priorReview.prNumber} that still need addressing:\n${blockers.join("\n")}`
+      : `Reviewer summary from PR #${priorReview.prNumber}: ${priorReview.reviewSummary}`;
+  return [
+    base,
+    "This phase exists because the previous review requested changes — apply edits that address the feedback, then call submit_implementation again.",
+    blockerBlock,
+    "If you genuinely believe no code change is required (e.g. the reviewer is wrong about a fact you can verify in the diff), call report_design_question instead.",
   ].join("\n\n");
 }
 
