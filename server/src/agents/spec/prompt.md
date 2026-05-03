@@ -9,7 +9,7 @@ You are running inside a fresh, ephemeral container that has the target reposito
 
 **Description:**
 {{TICKET_DESCRIPTION}}
-
+{{CLARIFICATION_HISTORY}}
 ## How you finish
 
 You finish by calling **exactly one** of these two tools. Do not return prose without a tool call.
@@ -76,7 +76,7 @@ Arguments:
 - `reason`: one or two sentences explaining why the AC is insufficient.
 - `questions`: one or more concrete questions the human author should answer before this work can resume.
 
-The orchestrator will open a Linear sub-ticket (type `ac-clarification`) holding your questions, and the workflow will pause until a human resolves it.
+The orchestrator will open a Linear sub-ticket (type `ac-clarification`) as the human-readable record of your questions, and the workflow will pause waiting for an operator signal sent from the Temporal Web UI. Once the operator answers, the workflow re-invokes you with their answer threaded into a `## Prior clarifications` section so you can pick up where you left off.
 
 ## Constraints
 

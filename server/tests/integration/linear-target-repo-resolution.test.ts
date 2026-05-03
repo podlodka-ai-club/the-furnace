@@ -16,7 +16,7 @@ import type { CoderPhaseInput, SpecPhaseInput } from "../../src/temporal/activit
 import type {
   CoderPhaseOutput,
   ReviewerInput,
-  SpecPhaseOutput,
+  SpecPhaseResult,
 } from "../../src/agents/contracts/index.js";
 import type {
   LaunchWorkerContainerInput,
@@ -115,7 +115,7 @@ function buildListActivity(): TemporalWorkerActivities["listAgentReadyTicketsAct
 }
 
 function defaultPhaseActivities(): {
-  runSpecPhase: (input: SpecPhaseInput) => Promise<SpecPhaseOutput>;
+  runSpecPhase: (input: SpecPhaseInput) => Promise<SpecPhaseResult>;
   runCoderPhase: (input: CoderPhaseInput) => Promise<CoderPhaseOutput>;
   runReviewPhase: (input: ReviewerInput) => Promise<{
     verdict: "approve";
@@ -124,16 +124,19 @@ function defaultPhaseActivities(): {
   }>;
 } {
   return {
-    runSpecPhase: async (input: SpecPhaseInput): Promise<SpecPhaseOutput> => ({
-      featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
-      testCommits: [
-        {
-          sha: "a".repeat(40),
-          path: "server/tests/integration/sample.test.ts",
-          description: `Failing acceptance tests for ${input.ticket.identifier}`,
-        },
-      ],
-      implementationPlan: validImplementationPlan,
+    runSpecPhase: async (input: SpecPhaseInput): Promise<SpecPhaseResult> => ({
+      kind: "done",
+      output: {
+        featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+        testCommits: [
+          {
+            sha: "a".repeat(40),
+            path: "server/tests/integration/sample.test.ts",
+            description: `Failing acceptance tests for ${input.ticket.identifier}`,
+          },
+        ],
+        implementationPlan: validImplementationPlan,
+      },
     }),
     runCoderPhase: async (input: CoderPhaseInput): Promise<CoderPhaseOutput> => ({
       featureBranch: input.specOutput.featureBranch,
@@ -158,6 +161,7 @@ function buildOrchestratorActivities(opts: {
     helloActivity: async (n: string) => `hello, ${n}`,
     listAgentReadyTicketsActivity: buildListActivity(),
     syncLinearTicketStateActivity: async () => {},
+    resolveClarificationSubTicketActivity: async () => {},
     validateRepoSlug: async () => {},
     openPullRequestActivity: async () => ({
       number: 1,

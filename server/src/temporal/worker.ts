@@ -4,7 +4,7 @@ import type {
   CoderPhaseOutput,
   ReviewResult,
   ReviewerInput,
-  SpecPhaseOutput,
+  SpecPhaseResult,
 } from "../agents/contracts/index.js";
 import type { ResolvedTicket } from "../linear/types.js";
 import {
@@ -16,7 +16,10 @@ import * as linearActivities from "./activities/linear.js";
 import * as phaseActivities from "./activities/phases.js";
 import * as workerLauncherActivities from "./activities/worker-launcher.js";
 import type { CoderPhaseInput, SpecPhaseInput } from "./activities/phases.js";
-import type { SyncLinearTicketStateInput } from "./activities/linear.js";
+import type {
+  ResolveClarificationSubTicketInput,
+  SyncLinearTicketStateInput,
+} from "./activities/linear.js";
 import type {
   OpenPullRequestInput,
   OpenPullRequestResult,
@@ -41,11 +44,12 @@ export interface TemporalWorkerActivities {
   helloActivity(name: string): Promise<string>;
   listAgentReadyTicketsActivity(): Promise<ResolvedTicket[]>;
   syncLinearTicketStateActivity(input: SyncLinearTicketStateInput): Promise<void>;
+  resolveClarificationSubTicketActivity(input: ResolveClarificationSubTicketInput): Promise<void>;
   // Phase activities are NOT registered on the orchestrator queue in production;
   // they run inside ephemeral per-repo containers and are dispatched on the
   // per-repo task queue (`repo-${slug}-worker`). They remain part of this type
   // so tests can opt into orchestrator-side execution via `injectPhaseActivities`.
-  runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseOutput>;
+  runSpecPhase(input: SpecPhaseInput): Promise<SpecPhaseResult>;
   runCoderPhase(input: CoderPhaseInput): Promise<CoderPhaseOutput>;
   runReviewPhase(input: ReviewerInput): Promise<ReviewResult>;
   launchWorkerContainer(input: LaunchWorkerContainerInput): Promise<LaunchWorkerContainerResult>;

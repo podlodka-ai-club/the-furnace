@@ -17,15 +17,22 @@ import {
 import {
   buildPerTicketWorkflowId,
   cancelSignal,
+  clarificationAnswerSignal,
+  currentClarificationQuery,
   currentPhaseQuery,
   currentRoundQuery,
   PER_TICKET_WORKFLOW_NAME,
+  PHASE_ATTEMPT_BUDGET_EXHAUSTED_FAILURE_TYPE,
   REVIEW_ROUND_CAP_EXHAUSTED_FAILURE_TYPE,
   attemptCountQuery,
 } from "../../src/temporal/workflows/per-ticket.js";
 import type { CoderPhaseInput, SpecPhaseInput } from "../../src/temporal/activities/phases.js";
-import type { SpecPhaseOutput } from "../../src/agents/contracts/index.js";
+import type { SpecPhaseOutput, SpecPhaseResult } from "../../src/agents/contracts/index.js";
 import type { ReviewerInput } from "../../src/agents/contracts/index.js";
+
+function specPhaseDone(output: SpecPhaseOutput): SpecPhaseResult {
+  return { kind: "done", output };
+}
 import type {
   LaunchWorkerContainerInput,
   LaunchWorkerContainerResult,
@@ -108,7 +115,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         await specGate;
-        return {
+        return specPhaseDone({
           featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
           testCommits: [
             {
@@ -118,7 +125,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           implementationPlan: validImplementationPlan,
-        };
+        });
       },
       runCoderPhase: async (input: CoderPhaseInput) => ({
         featureBranch: input.specOutput.featureBranch,
@@ -204,7 +211,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
       runSpecPhase: async (input: SpecPhaseInput) => {
         phaseCalls.push("spec");
         await specGate;
-        return {
+        return specPhaseDone({
           featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
           testCommits: [
             {
@@ -214,7 +221,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           implementationPlan: validImplementationPlan,
-        };
+        });
       },
       runCoderPhase: async (input: CoderPhaseInput) => {
         phaseCalls.push("coder");
@@ -301,7 +308,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         phaseCalls.push("spec");
-        return {
+        return specPhaseDone({
           featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
           testCommits: [
             {
@@ -311,7 +318,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           implementationPlan: validImplementationPlan,
-        };
+        });
       },
       runCoderPhase: async (_input: CoderPhaseInput) => {
         phaseCalls.push("coder");
@@ -387,7 +394,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         phaseCalls.push("spec");
-        return {
+        return specPhaseDone({
           featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
           testCommits: [
             {
@@ -397,7 +404,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           implementationPlan: validImplementationPlan,
-        };
+        });
       },
       runCoderPhase: async (_input: CoderPhaseInput) => {
         phaseCalls.push("coder");
@@ -468,7 +475,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         phaseCalls.push("spec");
-        return {
+        return specPhaseDone({
           featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
           testCommits: [
             {
@@ -478,7 +485,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           implementationPlan: validImplementationPlan,
-        };
+        });
       },
       runCoderPhase: async (input: CoderPhaseInput) => {
         phaseCalls.push("coder");
@@ -559,7 +566,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const phaseActivities = {
       runSpecPhase: async (input: SpecPhaseInput) => {
         phaseCalls.push("spec");
-        return {
+        return specPhaseDone({
           featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
           testCommits: [
             {
@@ -569,7 +576,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
             },
           ],
           implementationPlan: validImplementationPlan,
-        };
+        });
       },
       runCoderPhase: async (_input: CoderPhaseInput) => {
         phaseCalls.push("coder");
@@ -634,7 +641,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const reviewerInputs: ReviewerInput[] = [];
 
     const phaseActivities = {
-      runSpecPhase: async (input: SpecPhaseInput) => ({
+      runSpecPhase: async (input: SpecPhaseInput) => specPhaseDone({
         featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
         testCommits: [
           {
@@ -727,7 +734,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const coderInputs: CoderPhaseInput[] = [];
 
     const phaseActivities = {
-      runSpecPhase: async (input: SpecPhaseInput) => ({
+      runSpecPhase: async (input: SpecPhaseInput) => specPhaseDone({
         featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
         testCommits: [
           {
@@ -835,7 +842,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     const syncedStateNames: string[] = [];
 
     const phaseActivities = {
-      runSpecPhase: async (input: SpecPhaseInput) => ({
+      runSpecPhase: async (input: SpecPhaseInput) => specPhaseDone({
         featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
         testCommits: [
           {
@@ -950,7 +957,7 @@ describe("Temporal per-ticket workflow orchestration", () => {
     let cancelHook: (() => Promise<void>) | undefined;
 
     const phaseActivities = {
-      runSpecPhase: async (input: SpecPhaseInput) => ({
+      runSpecPhase: async (input: SpecPhaseInput) => specPhaseDone({
         featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
         testCommits: [
           {
@@ -1044,6 +1051,774 @@ describe("Temporal per-ticket workflow orchestration", () => {
     expect(postReviewCalls).toBe(1);
     expect(syncedStateNames).toEqual(["In Progress", "Canceled"]);
   }, 30_000);
+
+  it("clarification signal flow: spec returns awaiting → query exposes question → operator signal → spec re-dispatched with priorClarifications → succeeds", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_99",
+      identifier: "ENG-CL-1",
+      title: "[ac-clarification] ENG-7",
+    };
+    const resolveCalls: Array<{ subTicketId: string; answer: string; resolvedBy?: string }> = [];
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        if (specInputs.length === 1) {
+          return {
+            kind: "awaiting_clarification" as const,
+            subTicketRef,
+            reason: "AC §2 ambiguous",
+            questions: ["What does merge mean here?"],
+          };
+        }
+        return specPhaseDone({
+          featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+          testCommits: [
+            {
+              sha: "a".repeat(40),
+              path: "server/tests/integration/sample.test.ts",
+              description: "default",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        });
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      resolveClarificationSubTicketActivity: async (input) => {
+        resolveCalls.push(input);
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_7",
+                identifier: "ENG-7",
+                title: "needs clarification",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          return c !== undefined;
+        });
+        const pending = await handle.query(currentClarificationQuery);
+        expect(pending).toBeDefined();
+        expect(pending?.subTicketRef).toEqual(subTicketRef);
+        expect(pending?.reason).toBe("AC §2 ambiguous");
+        expect(pending?.questions).toEqual(["What does merge mean here?"]);
+
+        await handle.signal(clarificationAnswerSignal, {
+          answer: "Use INSERT ... ON CONFLICT DO UPDATE.",
+          resolvedBy: "alice@example.com",
+        });
+
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
+
+        // After workflow completes, pending clarification cleared.
+        await expect(handle.query(currentClarificationQuery)).resolves.toBeUndefined();
+      });
+    });
+
+    expect(specInputs).toHaveLength(2);
+    expect(specInputs[0].priorClarifications ?? []).toEqual([]);
+    expect(specInputs[1].priorClarifications).toEqual([
+      {
+        reason: "AC §2 ambiguous",
+        questions: ["What does merge mean here?"],
+        answer: "Use INSERT ... ON CONFLICT DO UPDATE.",
+        resolvedBy: "alice@example.com",
+      },
+    ]);
+    expect(resolveCalls).toHaveLength(1);
+    expect(resolveCalls[0]).toMatchObject({
+      subTicketId: subTicketRef.id,
+      answer: "Use INSERT ... ON CONFLICT DO UPDATE.",
+      resolvedBy: "alice@example.com",
+    });
+  }, 30_000);
+
+  it("cancel during clarification wait: workflow ends cancelled without re-invoking spec phase", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const syncedStateNames: string[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_cancel",
+      identifier: "ENG-CL-2",
+      title: "[ac-clarification] ENG-8",
+    };
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        return {
+          kind: "awaiting_clarification" as const,
+          subTicketRef,
+          reason: "blocked",
+          questions: ["?"],
+        };
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      syncLinearTicketStateActivity: async (input) => {
+        syncedStateNames.push(input.stateName);
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_8",
+                identifier: "ENG-8",
+                title: "cancel during wait",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          return c !== undefined;
+        });
+
+        await handle.signal(cancelSignal);
+
+        await expect(handle.result()).resolves.toEqual({ status: "cancelled" });
+        expect(await handle.query(currentPhaseQuery)).toBe("cancelled");
+      });
+    });
+
+    expect(specInputs).toHaveLength(1);
+    expect(syncedStateNames).toEqual(["In Progress", "Canceled"]);
+  }, 30_000);
+
+  it("malformed clarificationAnswer signal is ignored; subsequent valid signal unblocks the workflow", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_bad",
+      identifier: "ENG-CL-3",
+      title: "[ac-clarification] ENG-9",
+    };
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        if (specInputs.length === 1) {
+          return {
+            kind: "awaiting_clarification" as const,
+            subTicketRef,
+            reason: "blocked",
+            questions: ["?"],
+          };
+        }
+        return specPhaseDone({
+          featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+          testCommits: [
+            {
+              sha: "a".repeat(40),
+              path: "server/tests/integration/sample.test.ts",
+              description: "default",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        });
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_9",
+                identifier: "ENG-9",
+                title: "malformed signal then valid",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          return c !== undefined;
+        });
+
+        // Malformed: missing required `answer` field. Handler must reject and
+        // leave the workflow waiting.
+        await handle.signal(clarificationAnswerSignal, { resolvedBy: "alice" });
+
+        // Workflow must still be waiting; pendingClarification still set.
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        const stillPending = await handle.query(currentClarificationQuery);
+        expect(stillPending).toBeDefined();
+        expect(specInputs).toHaveLength(1);
+
+        // Valid signal unblocks.
+        await handle.signal(clarificationAnswerSignal, {
+          answer: "use upsert",
+          resolvedBy: "alice@example.com",
+        });
+
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
+      });
+    });
+
+    expect(specInputs).toHaveLength(2);
+  }, 30_000);
+
+  it("clarification re-dispatch consumes shared PHASE_MAX_ATTEMPTS budget; exhaustion surfaces failure", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_exhaust",
+      identifier: "ENG-CL-X",
+      title: "[ac-clarification] ENG-X",
+    };
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        // Always return awaiting; with PHASE_MAX_ATTEMPTS=3 and a shared
+        // budget, the 3rd response consumes the last slot and the next
+        // re-dispatch attempt must fail without invoking runSpecPhase again.
+        return {
+          kind: "awaiting_clarification" as const,
+          subTicketRef,
+          reason: `round ${specInputs.length}`,
+          questions: [`q${specInputs.length}`],
+        };
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_x",
+                identifier: "ENG-X",
+                title: "exhaust budget",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        // Drive 3 clarification rounds, each consuming one budget slot.
+        for (let round = 1; round <= 3; round += 1) {
+          await waitFor(async () => {
+            const c = await handle.query(currentClarificationQuery);
+            return c?.reason === `round ${round}`;
+          });
+          await handle.signal(clarificationAnswerSignal, {
+            answer: `answer ${round}`,
+          });
+        }
+
+        const failure = await handle.result().then(
+          () => {
+            throw new Error("expected workflow to fail with budget exhausted");
+          },
+          (e: unknown) => e,
+        );
+        expect(failure).toBeInstanceOf(WorkflowFailedError);
+        const cause = (failure as WorkflowFailedError).cause;
+        expect(cause).toBeInstanceOf(ApplicationFailure);
+        expect((cause as ApplicationFailure).type).toBe(
+          PHASE_ATTEMPT_BUDGET_EXHAUSTED_FAILURE_TYPE,
+        );
+      });
+    });
+
+    expect(specInputs).toHaveLength(3);
+    // Each re-dispatch carries the prior clarification(s) into the next call.
+    expect(specInputs[0].priorClarifications ?? []).toEqual([]);
+    expect(specInputs[1].priorClarifications).toHaveLength(1);
+    expect(specInputs[2].priorClarifications).toHaveLength(2);
+  }, 30_000);
+
+  it("clarificationAnswer signal sent before any pending clarification is rejected", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_early",
+      identifier: "ENG-CL-E",
+      title: "[ac-clarification] ENG-E",
+    };
+
+    let releaseFirstSpec: () => void = () => {};
+    const firstSpecGate = new Promise<void>((resolve) => {
+      releaseFirstSpec = resolve;
+    });
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        if (specInputs.length === 1) {
+          // Hold the first spec activity until the test has sent the early
+          // signal — this guarantees pendingClarification is undefined when
+          // the signal handler runs.
+          await firstSpecGate;
+          return {
+            kind: "awaiting_clarification" as const,
+            subTicketRef,
+            reason: "blocked",
+            questions: ["?"],
+          };
+        }
+        return specPhaseDone({
+          featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+          testCommits: [
+            {
+              sha: "a".repeat(40),
+              path: "server/tests/integration/sample.test.ts",
+              description: "default",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        });
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_e",
+                identifier: "ENG-E",
+                title: "early signal",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        // Send the early signal before the first spec activity has returned;
+        // pendingClarification is undefined so the handler must drop it.
+        await handle.signal(clarificationAnswerSignal, {
+          answer: "early — must be rejected",
+        });
+
+        // Let the spec activity run and surface awaiting_clarification.
+        releaseFirstSpec();
+
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          return c !== undefined;
+        });
+
+        // Workflow must still be waiting — the early signal was rejected, so
+        // the spec activity has not been re-dispatched.
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        expect(specInputs).toHaveLength(1);
+        const stillPending = await handle.query(currentClarificationQuery);
+        expect(stillPending).toBeDefined();
+
+        // A subsequent valid signal unblocks the workflow.
+        await handle.signal(clarificationAnswerSignal, {
+          answer: "real answer",
+          resolvedBy: "alice@example.com",
+        });
+
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
+      });
+    });
+
+    expect(specInputs).toHaveLength(2);
+    expect(specInputs[1].priorClarifications).toEqual([
+      {
+        reason: "blocked",
+        questions: ["?"],
+        answer: "real answer",
+        resolvedBy: "alice@example.com",
+      },
+    ]);
+  }, 30_000);
+
+  it("currentClarification query returns undefined immediately after signal received, before sub-ticket resolution completes", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_query_clear",
+      identifier: "ENG-CL-Q",
+      title: "[ac-clarification] ENG-Q",
+    };
+
+    let observedDuringResolve: unknown = "not-observed";
+    let releaseResolve: () => void = () => {};
+    const resolveGate = new Promise<void>((resolve) => {
+      releaseResolve = resolve;
+    });
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        if (specInputs.length === 1) {
+          return {
+            kind: "awaiting_clarification" as const,
+            subTicketRef,
+            reason: "blocked",
+            questions: ["?"],
+          };
+        }
+        return specPhaseDone({
+          featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+          testCommits: [
+            {
+              sha: "a".repeat(40),
+              path: "server/tests/integration/sample.test.ts",
+              description: "default",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        });
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      resolveClarificationSubTicketActivity: async () => {
+        // Hold the activity open so the test can query while the workflow is
+        // mid-resolution. The query must already return undefined because the
+        // workflow clears pendingClarification immediately after the wait.
+        await resolveGate;
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_q",
+                identifier: "ENG-Q",
+                title: "query clears immediately",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          return c !== undefined;
+        });
+
+        await handle.signal(clarificationAnswerSignal, {
+          answer: "use upsert",
+        });
+
+        // Poll until the query reflects the cleared state. The workflow must
+        // clear pendingClarification before awaiting the resolve activity, so
+        // this transition happens while the gate is still held.
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          if (c === undefined) {
+            observedDuringResolve = "undefined";
+            return true;
+          }
+          return false;
+        });
+
+        // Release the resolve activity so the workflow can finish.
+        releaseResolve();
+
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
+      });
+    });
+
+    expect(observedDuringResolve).toBe("undefined");
+    expect(specInputs).toHaveLength(2);
+  }, 30_000);
+
+  it("resolveClarificationSubTicketActivity failure is best-effort: workflow still re-dispatches spec phase", async () => {
+    await expect(assertTemporalPortReachable()).resolves.toBeUndefined();
+
+    const specInputs: SpecPhaseInput[] = [];
+    const subTicketRef = {
+      id: "issue_clarify_resolve_fail",
+      identifier: "ENG-CL-4",
+      title: "[ac-clarification] ENG-10",
+    };
+
+    const phaseActivities = {
+      runSpecPhase: async (input: SpecPhaseInput) => {
+        specInputs.push(input);
+        if (specInputs.length === 1) {
+          return {
+            kind: "awaiting_clarification" as const,
+            subTicketRef,
+            reason: "blocked",
+            questions: ["?"],
+          };
+        }
+        return specPhaseDone({
+          featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+          testCommits: [
+            {
+              sha: "a".repeat(40),
+              path: "server/tests/integration/sample.test.ts",
+              description: "default",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        });
+      },
+      runCoderPhase: async (input: CoderPhaseInput) => ({
+        featureBranch: input.specOutput.featureBranch,
+        finalCommitSha: "f".repeat(40),
+        diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
+        testRunSummary: { total: 1, passed: 1, failed: 0, durationMs: 1 },
+      }),
+      runReviewPhase: async (_input: ReviewerInput) => ({
+        verdict: "approve" as const,
+        reasoning: "ok",
+        findings: [],
+      }),
+    };
+
+    const activities: TemporalWorkerActivities = {
+      ...buildBaseActivities(),
+      ...phaseActivities,
+      resolveClarificationSubTicketActivity: async () => {
+        // Simulate Linear outage that exhausts retries with a non-retryable
+        // failure so the workflow's try/catch swallows it.
+        throw ApplicationFailure.nonRetryable(
+          "Linear API down",
+          "LinearOutage",
+        );
+      },
+    };
+
+    const client = await createTemporalClient();
+    const worker = await createTemporalWorker({ activities });
+    const repoWorker = await createPerRepoWorker({
+      taskQueue: TEST_REPO_QUEUE,
+      activities: phaseActivities,
+    });
+
+    await worker.runUntil(async () => {
+      await repoWorker.runUntil(async () => {
+        const handle = await client.workflow.start(PER_TICKET_WORKFLOW_NAME, {
+          args: [
+            {
+              ticket: {
+                id: "issue_10",
+                identifier: "ENG-10",
+                title: "resolve activity fails",
+                description: "",
+              },
+              targetRepoSlug: TEST_REPO_SLUG,
+            },
+          ],
+          taskQueue: TEMPORAL_TASK_QUEUE,
+          workflowId: `test-ticket-${randomUUID()}`,
+        });
+
+        await waitFor(async () => {
+          const c = await handle.query(currentClarificationQuery);
+          return c !== undefined;
+        });
+
+        await handle.signal(clarificationAnswerSignal, {
+          answer: "use upsert",
+        });
+
+        await expect(handle.result()).resolves.toEqual({
+          status: "succeeded",
+          pr: { number: 1, url: "https://github.test/example/pr/1" },
+        });
+      });
+    });
+
+    expect(specInputs).toHaveLength(2);
+  }, 30_000);
 });
 
 function buildBaseActivities(): TemporalWorkerActivities {
@@ -1051,7 +1826,8 @@ function buildBaseActivities(): TemporalWorkerActivities {
     helloActivity: async (name: string) => `hello, ${name}`,
     listAgentReadyTicketsActivity: async () => [],
     syncLinearTicketStateActivity: async (_input) => {},
-    runSpecPhase: async (_input: SpecPhaseInput) => ({
+    resolveClarificationSubTicketActivity: async (_input) => {},
+    runSpecPhase: async (_input: SpecPhaseInput) => specPhaseDone({
       featureBranch: "agent/spec",
       testCommits: [
         {

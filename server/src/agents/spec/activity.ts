@@ -2,9 +2,13 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { ApplicationFailure, Context } from "@temporalio/activity";
 import {
+  type AwaitingClarificationResult,
   type ImplementationPlan,
+  type PriorClarification,
   type SpecPhaseOutput,
-  specPhaseOutputSchema,
+  type SpecPhaseResult,
+  priorClarificationSchema,
+  specPhaseResultSchema,
 } from "../contracts/index.js";
 import {
   reviewerTicketSchema,
@@ -51,17 +55,18 @@ const HEARTBEAT_INTERVAL_MS = 5_000;
 // Failure types surfaced to the workflow as ApplicationFailure.type values.
 export const SPEC_FAILURE_TYPES = {
   invalidInput: "InvalidSpecPhaseInput",
-  acClarificationRequested: "AcClarificationRequested",
   toolBudgetExhausted: "SpecAgentBudgetExhausted",
   testVerificationFailed: "SpecTestVerificationFailed",
 } as const;
 
 export const specPhaseInputSchema = z.object({
   ticket: reviewerTicketSchema,
+  priorClarifications: z.array(priorClarificationSchema).optional(),
 });
 
 export interface SpecPhaseInput {
   ticket: ReviewerTicket;
+  priorClarifications?: PriorClarification[];
 }
 
 export interface TicketRecord {
@@ -106,7 +111,7 @@ interface InternalContext {
 export async function runSpecPhase(
   input: SpecPhaseInput,
   deps: RunSpecPhaseDeps = {},
-): Promise<SpecPhaseOutput> {
+): Promise<SpecPhaseResult> {
   const validatedInput = parseInput(input);
   heartbeat({ phase: "spec", ticketId: validatedInput.ticket.id });
 
@@ -126,7 +131,12 @@ export async function runSpecPhase(
   };
 
   const promptTemplate = await loadPrompt();
-  const prompt = renderPrompt(promptTemplate, ticket, repoPath);
+  const prompt = renderPrompt(
+    promptTemplate,
+    ticket,
+    repoPath,
+    validatedInput.priorClarifications ?? [],
+  );
 
   const internal: InternalContext = {
     ticket,
@@ -141,7 +151,8 @@ export async function runSpecPhase(
     run,
   };
 
-  return await driveAgentLoop(internal);
+  const result = await driveAgentLoop(internal);
+  return specPhaseResultSchema.parse(result);
 }
 
 function parseInput(input: SpecPhaseInput): SpecPhaseInput {
@@ -155,7 +166,7 @@ function parseInput(input: SpecPhaseInput): SpecPhaseInput {
   return result.data;
 }
 
-async function driveAgentLoop(ctx: InternalContext): Promise<SpecPhaseOutput> {
+async function driveAgentLoop(ctx: InternalContext): Promise<SpecPhaseResult> {
   const abort = new AbortController();
   const heartbeatTimer = setInterval(() => heartbeat({ phase: "spec", ticketId: ctx.ticket.id }), HEARTBEAT_INTERVAL_MS);
   // Build system prompt from the rendered prompt; the tool descriptions and
@@ -182,7 +193,7 @@ async function driveAgentLoop(ctx: InternalContext): Promise<SpecPhaseOutput> {
           corrections,
         );
         if (handled.kind === "done") {
-          return handled.output;
+          return { kind: "done", output: handled.output };
         }
         // false-failing-test correction: continue the loop with new decision
         corrections = handled.corrections;
@@ -190,9 +201,7 @@ async function driveAgentLoop(ctx: InternalContext): Promise<SpecPhaseOutput> {
         continue;
       }
       if (decision.type === "request_ac_clarification") {
-        await handleRequestAcClarification(ctx, decision.input);
-        // handleRequestAcClarification always throws on success path
-        throw new Error("unreachable");
+        return await handleRequestAcClarification(ctx, decision.input);
       }
       // no_tool_call or malformed_tool_call → corrective nudge
       if (corrections >= SPEC_CORRECTION_BUDGET) {
@@ -288,9 +297,10 @@ async function handleProposeFailingTests(
   await pushBranch(ops, featureBranch);
 
   const output = { featureBranch, testCommits: commits, implementationPlan };
-  // 5. Defense-in-depth: validate before returning so a malformed payload
-  // throws rather than reaches the workflow.
-  return { kind: "done", output: specPhaseOutputSchema.parse(output) };
+  // The full SpecPhaseResult is validated at the top-level activity boundary
+  // (`runSpecPhase` calls `specPhaseResultSchema.parse`), which transitively
+  // validates this output via the `done` variant.
+  return { kind: "done", output };
 }
 
 function buildFalseFailingNudge(passingPaths: ReadonlyArray<string>, output: string): string {
@@ -310,7 +320,7 @@ function buildFalseFailingNudge(passingPaths: ReadonlyArray<string>, output: str
 async function handleRequestAcClarification(
   ctx: InternalContext,
   input: { reason: string; questions: string[] },
-): Promise<never> {
+): Promise<AwaitingClarificationResult> {
   heartbeat({ phase: "spec", action: "request_clarification", ticketId: ctx.ticket.id });
   const body = buildClarificationBody(input);
   const deepLink = buildWorkflowDeepLink(ctx.webBase, ctx.namespace, ctx.workflowId);
@@ -333,11 +343,12 @@ async function handleRequestAcClarification(
     });
   }
 
-  throw ApplicationFailure.nonRetryable(
-    `Spec agent requested AC clarification: opened ${subTicket.identifier}`,
-    SPEC_FAILURE_TYPES.acClarificationRequested,
-    { subTicketRef: subTicket },
-  );
+  return {
+    kind: "awaiting_clarification",
+    subTicketRef: subTicket,
+    reason: input.reason,
+    questions: input.questions,
+  };
 }
 
 export function buildClarificationBody(input: { reason: string; questions: string[] }): string {
@@ -355,12 +366,39 @@ export function buildWorkflowDeepLink(
   return `${trimmed}/namespaces/${encodeURIComponent(namespace)}/workflows/${encodeURIComponent(workflowId)}`;
 }
 
-export function renderPrompt(template: string, ticket: TicketRecord, repoPath: string): string {
+export function renderPrompt(
+  template: string,
+  ticket: TicketRecord,
+  repoPath: string,
+  priorClarifications: ReadonlyArray<PriorClarification> = [],
+): string {
   return template
     .replaceAll("{{TICKET_IDENTIFIER}}", ticket.identifier)
     .replaceAll("{{TICKET_TITLE}}", ticket.title)
     .replaceAll("{{TICKET_DESCRIPTION}}", ticket.description.length > 0 ? ticket.description : "(no description)")
-    .replaceAll("{{WORKER_REPO_PATH}}", repoPath);
+    .replaceAll("{{WORKER_REPO_PATH}}", repoPath)
+    .replaceAll("{{CLARIFICATION_HISTORY}}", renderClarificationHistory(priorClarifications));
+}
+
+function renderClarificationHistory(priorClarifications: ReadonlyArray<PriorClarification>): string {
+  if (priorClarifications.length === 0) {
+    return "";
+  }
+  const entries = priorClarifications.map((entry, index) => {
+    const questions = entry.questions.map((q) => `  - ${q.trim()}`).join("\n");
+    const resolvedBy = entry.resolvedBy ? ` (resolved by ${entry.resolvedBy})` : "";
+    return [
+      `### Clarification ${index + 1}${resolvedBy}`,
+      "",
+      `**Reason:** ${entry.reason.trim()}`,
+      "",
+      "**Questions:**",
+      questions,
+      "",
+      `**Answer:** ${entry.answer.trim()}`,
+    ].join("\n");
+  });
+  return `\n## Prior clarifications\n\n${entries.join("\n\n")}\n`;
 }
 
 async function loadDefaultPrompt(): Promise<string> {

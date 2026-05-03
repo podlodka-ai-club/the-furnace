@@ -28,15 +28,18 @@ async function slowSpecPhase(input: TestSpecInput): Promise<unknown> {
     await Context.current().sleep("60 seconds");
   }
   return {
-    featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
-    testCommits: [
-      {
-        sha: "a".repeat(40),
-        path: "server/tests/integration/sample.test.ts",
-        description: `Failing acceptance tests for ${input.ticket.identifier}`,
-      },
-    ],
-    implementationPlan: validImplementationPlan,
+    kind: "done",
+    output: {
+      featureBranch: `agent/spec-${input.ticket.identifier.toLowerCase()}`,
+      testCommits: [
+        {
+          sha: "a".repeat(40),
+          path: "server/tests/integration/sample.test.ts",
+          description: `Failing acceptance tests for ${input.ticket.identifier}`,
+        },
+      ],
+      implementationPlan: validImplementationPlan,
+    },
   };
 }
 

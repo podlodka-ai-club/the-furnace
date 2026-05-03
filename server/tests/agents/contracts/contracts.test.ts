@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   coderPhaseOutputSchema,
+  currentClarificationSchema,
   diffStatSchema,
   reviewResultSchema,
   reviewerInputSchema,
@@ -163,6 +164,29 @@ describe("agent contracts", () => {
           reasoning: "ok",
           findings: [{ path: "", severity: "blocking", message: "" }],
         }),
+      ).toThrow();
+    });
+  });
+
+  describe("currentClarificationSchema query contract", () => {
+    const validPayload = {
+      subTicketRef: validSubTicketRef,
+      reason: "AC §2 ambiguous",
+      questions: ["What does merge mean here?"],
+      askedAt: "2026-05-03T17:00:00.000Z",
+    };
+
+    it("accepts the active-clarification shape", () => {
+      expect(currentClarificationSchema.parse(validPayload)).toEqual(validPayload);
+    });
+
+    it("accepts undefined (query handler returns undefined before/after wait)", () => {
+      expect(currentClarificationSchema.parse(undefined)).toBeUndefined();
+    });
+
+    it("rejects malformed shapes", () => {
+      expect(() =>
+        currentClarificationSchema.parse({ ...validPayload, questions: [] }),
       ).toThrow();
     });
   });

@@ -7,6 +7,7 @@ import {
   reviewResultSchema,
   reviewerInputSchema,
   specPhaseOutputSchema,
+  specPhaseResultSchema,
 } from "../../../src/agents/contracts/index.js";
 import {
   runCoderPhase,
@@ -105,7 +106,7 @@ describe("phase activities contract boundaries", () => {
         updateIssueState: async () => {},
       };
 
-      const output = await runSpecPhase(input, {
+      const result = await runSpecPhase(input, {
         agentClient,
         runCommand: run,
         linearClient,
@@ -118,7 +119,11 @@ describe("phase activities contract boundaries", () => {
         }),
         resolveWebBase: () => "http://localhost:8233",
       });
-      expect(specPhaseOutputSchema.parse(output)).toEqual(output);
+      expect(specPhaseResultSchema.parse(result)).toEqual(result);
+      if (result.kind !== "done") {
+        throw new Error(`expected kind "done", got ${result.kind}`);
+      }
+      expect(specPhaseOutputSchema.parse(result.output)).toEqual(result.output);
     } finally {
       await rm(repoPath, { recursive: true, force: true });
     }

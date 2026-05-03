@@ -25,5 +25,6 @@ services:
       - temporal
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CSRF_COOKIE_INSECURE=true
     ports:
       - "8233:8080"

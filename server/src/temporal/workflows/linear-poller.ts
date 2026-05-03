@@ -45,11 +45,13 @@ export async function linearPollerWorkflow(): Promise<LinearPollerWorkflowResult
         ],
         workflowId,
         // Allow re-running a per-ticket workflow only when the previous run
-        // ended in failure (e.g. acClarificationRequested). A successful run
-        // is a terminal "shipped" state and must not be retriggered by the
-        // poller; a failed run reflects a recoverable condition (operator
-        // answered the clarification, fixed AC, etc.) so the next poll can
-        // pick the ticket back up.
+        // ended in failure (e.g. a stuck failure like DepMissingRequested or
+        // DesignQuestionRequested). A successful run is a terminal "shipped"
+        // state and must not be retriggered by the poller; a failed run
+        // reflects a recoverable condition (operator resolved the sub-ticket,
+        // fixed the AC, etc.) so the next poll can pick the ticket back up.
+        // Note: AC clarification is no longer a workflow failure — the spec
+        // phase signal-and-waits inline (see clarification-via-signals).
         workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         parentClosePolicy: ParentClosePolicy.ABANDON,
       });

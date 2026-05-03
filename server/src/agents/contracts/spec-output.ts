@@ -34,8 +34,25 @@ export const specPhaseOutputSchema = z.object({
   acClarification: subTicketRefSchema.optional(),
 });
 
+export const awaitingClarificationResultSchema = z.object({
+  kind: z.literal("awaiting_clarification"),
+  subTicketRef: subTicketRefSchema,
+  reason: z.string().min(1),
+  questions: z.array(z.string().min(1)).min(1),
+});
+
+export const specPhaseResultSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("done"),
+    output: specPhaseOutputSchema,
+  }),
+  awaitingClarificationResultSchema,
+]);
+
 export type SpecTestCommit = z.infer<typeof specTestCommitSchema>;
 export type ImplementationPlanArea = z.infer<typeof implementationPlanAreaSchema>;
 export type ImplementationPlanWorkItem = z.infer<typeof implementationPlanWorkItemSchema>;
 export type ImplementationPlan = z.infer<typeof implementationPlanSchema>;
 export type SpecPhaseOutput = z.infer<typeof specPhaseOutputSchema>;
+export type AwaitingClarificationResult = z.infer<typeof awaitingClarificationResultSchema>;
+export type SpecPhaseResult = z.infer<typeof specPhaseResultSchema>;

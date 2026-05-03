@@ -1,20 +1,26 @@
 import {
   ActivityFailure,
   ApplicationFailure,
+  condition,
   defineQuery,
   defineSignal,
+  log,
   proxyActivities,
   setHandler,
   workflowInfo,
 } from "@temporalio/workflow";
-import type {
-  CoderPhaseOutput,
-  Finding,
-  PriorReview,
-  ReviewResult,
-  ReviewerInput,
-  ReviewerTicket,
-  SpecPhaseOutput,
+import {
+  clarificationAnswerSchema,
+  type ClarificationAnswer,
+  type CoderPhaseOutput,
+  type CurrentClarification,
+  type Finding,
+  type PriorClarification,
+  type PriorReview,
+  type ReviewResult,
+  type ReviewerInput,
+  type ReviewerTicket,
+  type SpecPhaseOutput,
 } from "../../agents/contracts/index.js";
 import type * as githubActivities from "../activities/github.js";
 import type * as linearActivities from "../activities/linear.js";
@@ -23,13 +29,22 @@ import type { LaunchWorkerContainerResult } from "../activities/worker-launcher.
 import { MAX_REVIEW_ROUNDS, PHASE_MAX_ATTEMPTS, phaseActivitiesForRepo } from "../dispatch.js";
 import { formatDiffSummary } from "../../github/trailers.js";
 
-const SPEC_AC_CLARIFICATION_FAILURE_TYPE = "AcClarificationRequested";
 const CODER_DEP_MISSING_FAILURE_TYPE = "DepMissingRequested";
 const CODER_DESIGN_QUESTION_FAILURE_TYPE = "DesignQuestionRequested";
 
 export const REVIEW_ROUND_CAP_EXHAUSTED_FAILURE_TYPE = "ReviewRoundCapExhausted";
 
+export const PHASE_ATTEMPT_BUDGET_EXHAUSTED_FAILURE_TYPE = "PhaseAttemptBudgetExhausted";
+
 export const PER_TICKET_WORKFLOW_NAME = "perTicketWorkflow";
+
+// Mutable counter shared between caller and `runPhase` so a budget can be
+// threaded across multiple `runPhase` invocations (e.g. spec re-dispatches
+// after clarification rounds). When omitted, `runPhase` allocates a fresh
+// per-call budget — preserving the original per-call cap for coder/review.
+interface AttemptBudget {
+  used: number;
+}
 
 export type PerTicketWorkflowPhase =
   | "queued"
@@ -56,19 +71,24 @@ export interface PerTicketWorkflowResult {
 }
 
 export const cancelSignal = defineSignal("cancel");
+export const clarificationAnswerSignal = defineSignal<[unknown]>("clarificationAnswer");
 export const currentPhaseQuery = defineQuery<PerTicketWorkflowPhase>("currentPhase");
 export const attemptCountQuery = defineQuery<number>("attemptCount");
 export const currentRoundQuery = defineQuery<number>("currentRound");
+export const currentClarificationQuery = defineQuery<CurrentClarification | undefined>(
+  "currentClarification",
+);
 
-const { syncLinearTicketStateActivity } = proxyActivities<typeof linearActivities>({
-  startToCloseTimeout: "1 minute",
-  retry: {
-    initialInterval: "1 second",
-    backoffCoefficient: 2,
-    maximumInterval: "30 seconds",
-    maximumAttempts: 5,
-  },
-});
+const { syncLinearTicketStateActivity, resolveClarificationSubTicketActivity } =
+  proxyActivities<typeof linearActivities>({
+    startToCloseTimeout: "1 minute",
+    retry: {
+      initialInterval: "1 second",
+      backoffCoefficient: 2,
+      maximumInterval: "30 seconds",
+      maximumAttempts: 5,
+    },
+  });
 
 const { launchWorkerContainer } = proxyActivities<typeof workerLauncherActivities>({
   startToCloseTimeout: "2 minutes",
@@ -108,13 +128,38 @@ export async function perTicketWorkflow(
   let attemptCount = 0;
   let currentRound = 0;
   let cancelled = false;
+  let pendingClarification: CurrentClarification | undefined;
+  let clarificationAnswer: ClarificationAnswer | undefined;
+  const priorClarifications: PriorClarification[] = [];
 
   setHandler(cancelSignal, () => {
     cancelled = true;
   });
+  setHandler(clarificationAnswerSignal, (payload: unknown) => {
+    const parsed = clarificationAnswerSchema.safeParse(payload);
+    if (!parsed.success) {
+      log.warn("Rejected malformed clarificationAnswer signal", {
+        error: parsed.error.message,
+      });
+      return;
+    }
+    if (pendingClarification === undefined) {
+      // No active clarification — drop early/late signals so a stray payload
+      // can't be applied to a future clarification round.
+      log.warn("Rejected clarificationAnswer signal with no pending clarification");
+      return;
+    }
+    if (clarificationAnswer !== undefined) {
+      // Already received; ignore duplicates so the spec re-dispatch isn't
+      // disturbed mid-way by a late-arriving second answer.
+      return;
+    }
+    clarificationAnswer = parsed.data;
+  });
   setHandler(currentPhaseQuery, () => currentPhase);
   setHandler(attemptCountQuery, () => attemptCount);
   setHandler(currentRoundQuery, () => currentRound);
+  setHandler(currentClarificationQuery, () => pendingClarification);
 
   // Defense-in-depth: the Linear client now guarantees a non-empty slug at the
   // producer boundary (see linear-target-repo-resolution change), so this check
@@ -281,9 +326,70 @@ export async function perTicketWorkflow(
   );
 
   async function runSpecPhaseWithRecording(): Promise<SpecPhaseOutput | null> {
-    return await runPhase("spec", () => runSpecPhase({ ticket: input.ticket }), {
-      stuckFailureTypes: [SPEC_AC_CLARIFICATION_FAILURE_TYPE],
-    });
+    // PHASE_MAX_ATTEMPTS spans the entire spec phase including all
+    // clarification re-dispatches; a single shared budget is threaded into
+    // every runPhase("spec", ...) call so re-dispatches consume it too.
+    const specBudget: AttemptBudget = { used: 0 };
+    while (true) {
+      const result = await runPhase(
+        "spec",
+        () => runSpecPhase({ ticket: input.ticket, priorClarifications }),
+        { attemptBudget: specBudget },
+      );
+      if (result === null) {
+        return null;
+      }
+      if (result.kind === "done") {
+        return result.output;
+      }
+
+      // awaiting_clarification: surface the question via the query, wait for
+      // an operator signal (or cancel), then re-dispatch the spec phase.
+      pendingClarification = {
+        subTicketRef: result.subTicketRef,
+        reason: result.reason,
+        questions: result.questions,
+        askedAt: new Date().toISOString(),
+      };
+
+      await condition(() => clarificationAnswer !== undefined || cancelled);
+
+      if (cancelled) {
+        await transitionToCancelled();
+        return null;
+      }
+
+      const answer = clarificationAnswer as ClarificationAnswer;
+      // Clear the pending clarification immediately so the `currentClarification`
+      // query reflects the resolved state even if the (best-effort) sub-ticket
+      // resolution activity is still running its retries.
+      pendingClarification = undefined;
+
+      // Best-effort: comment the answer onto the sub-ticket and close it so
+      // Linear stays consistent with the workflow state. If the activity
+      // exhausts its retries (Linear outage), log and continue — the
+      // workflow's source of truth is the signal, not the sub-ticket.
+      try {
+        await resolveClarificationSubTicketActivity({
+          subTicketId: result.subTicketRef.id,
+          answer: answer.answer,
+          resolvedBy: answer.resolvedBy,
+        });
+      } catch (err) {
+        log.warn("resolveClarificationSubTicketActivity failed; continuing", {
+          subTicketId: result.subTicketRef.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      priorClarifications.push({
+        reason: result.reason,
+        questions: result.questions,
+        answer: answer.answer,
+        resolvedBy: answer.resolvedBy,
+      });
+      clarificationAnswer = undefined;
+    }
   }
 
   // Per concept §3.6, every retry of a phase activity must run in a fresh
@@ -306,17 +412,23 @@ export async function perTicketWorkflow(
       // before transitioning to cancelled. Used by the review phase to ensure
       // the verdict is always posted to the PR.
       cancelAfterSuccess?: boolean;
+      // When set, attempts consume slots from this shared budget instead of a
+      // fresh per-call counter. Used so spec re-dispatches across clarification
+      // rounds share a single PHASE_MAX_ATTEMPTS budget.
+      attemptBudget?: AttemptBudget;
     } = {},
   ): Promise<T | null> {
     const stuckTypes = options.stuckFailureTypes ?? [];
     const cancelAfterSuccess = options.cancelAfterSuccess !== false;
+    const budget = options.attemptBudget ?? { used: 0 };
     let lastError: unknown;
-    for (let attempt = 1; attempt <= PHASE_MAX_ATTEMPTS; attempt += 1) {
+    while (budget.used < PHASE_MAX_ATTEMPTS) {
       if (cancelled) {
         await transitionToCancelled();
         return null;
       }
 
+      budget.used += 1;
       currentPhase = phase;
       attemptCount += 1;
 
@@ -348,7 +460,16 @@ export async function perTicketWorkflow(
         // Loop body re-launches a fresh container on the next iteration.
       }
     }
-    throw lastError;
+    if (lastError !== undefined) {
+      throw lastError;
+    }
+    // Budget was already exhausted on entry (e.g. spec re-dispatch after
+    // PHASE_MAX_ATTEMPTS clarifications without a `done` result). Surface a
+    // structured non-retryable failure so the workflow terminates cleanly.
+    throw ApplicationFailure.nonRetryable(
+      `Phase ${phase} attempt budget of ${PHASE_MAX_ATTEMPTS} exhausted without producing a result`,
+      PHASE_ATTEMPT_BUDGET_EXHAUSTED_FAILURE_TYPE,
+    );
   }
 
   async function transitionToCancelled(): Promise<void> {

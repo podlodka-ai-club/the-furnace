@@ -189,7 +189,7 @@ describe("runSpecPhase", () => {
       { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
     ]);
 
-    const output = await runSpecPhase(
+    const result = await runSpecPhase(
       { ticket: TICKET },
       makeBaseDeps({
         agentClient: client,
@@ -198,6 +198,10 @@ describe("runSpecPhase", () => {
       }),
     );
 
+    if (result.kind !== "done") {
+      throw new Error(`expected kind "done", got ${result.kind}`);
+    }
+    const output = result.output;
     expect(output.featureBranch).toBe("agent/spec-eng-42");
     expect(output.testCommits).toHaveLength(2);
     expect(output.testCommits[0]).toMatchObject({
@@ -259,7 +263,7 @@ describe("runSpecPhase", () => {
       { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
     ]);
 
-    const output = await runSpecPhase(
+    const result = await runSpecPhase(
       { ticket: TICKET },
       makeBaseDeps({
         agentClient: client,
@@ -268,6 +272,10 @@ describe("runSpecPhase", () => {
       }),
     );
 
+    if (result.kind !== "done") {
+      throw new Error(`expected kind "done", got ${result.kind}`);
+    }
+    const output = result.output;
     expect(output.testCommits).toHaveLength(1);
     expect(output.testCommits[0].path).toBe("tests/fails.test.ts");
     expect(agentCalls).toHaveLength(2);
@@ -312,7 +320,7 @@ describe("runSpecPhase", () => {
     }
   });
 
-  it("request_ac_clarification: opens sub-ticket and throws non-retryable AcClarificationRequested", async () => {
+  it("request_ac_clarification: opens sub-ticket and returns awaiting_clarification result", async () => {
     const decisions: SpecAgentDecision[] = [
       {
         type: "request_ac_clarification",
@@ -343,27 +351,26 @@ describe("runSpecPhase", () => {
 
     const { run } = makeScriptedRunCommand([]); // no shell calls expected
 
-    let caught: unknown;
-    try {
-      await runSpecPhase(
-        { ticket: TICKET },
-        makeBaseDeps({
-          agentClient: client,
-          runCommand: run,
-          linearClient,
-          resolveRepoPath: () => repoPath,
-          resolveWebBase: () => "https://temporal.example.test",
-        }),
-      );
-    } catch (err) {
-      caught = err;
-    }
+    const result = await runSpecPhase(
+      { ticket: TICKET },
+      makeBaseDeps({
+        agentClient: client,
+        runCommand: run,
+        linearClient,
+        resolveRepoPath: () => repoPath,
+        resolveWebBase: () => "https://temporal.example.test",
+      }),
+    );
 
-    expect(caught).toBeInstanceOf(ApplicationFailure);
-    expect((caught as ApplicationFailure).type).toBe(SPEC_FAILURE_TYPES.acClarificationRequested);
-    expect((caught as ApplicationFailure).nonRetryable).toBe(true);
-    const details = (caught as ApplicationFailure).details ?? [];
-    expect(details).toContainEqual({ subTicketRef: subTicket });
+    if (result.kind !== "awaiting_clarification") {
+      throw new Error(`expected kind "awaiting_clarification", got ${result.kind}`);
+    }
+    expect(result.subTicketRef).toEqual(subTicket);
+    expect(result.reason).toBe("AC §2 doesn't say what 'merge' means");
+    expect(result.questions).toEqual([
+      "What does merge mean here?",
+      "Is duplicate handling required?",
+    ]);
 
     expect(linearCalls).toHaveLength(1);
     expect(linearCalls[0].parentId).toBe(TICKET.id);
@@ -450,7 +457,7 @@ describe("runSpecPhase", () => {
       { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
     ]);
 
-    const output = await runSpecPhase(
+    const result = await runSpecPhase(
       { ticket: TICKET },
       makeBaseDeps({
         agentClient: client,
@@ -459,7 +466,10 @@ describe("runSpecPhase", () => {
       }),
     );
 
-    expect(output.implementationPlan).toEqual(validImplementationPlan);
+    if (result.kind !== "done") {
+      throw new Error(`expected kind "done", got ${result.kind}`);
+    }
+    expect(result.output.implementationPlan).toEqual(validImplementationPlan);
   });
 
   it("7.2 missing implementationPlan: malformed_tool_call nudges; budget exhaustion → SpecAgentBudgetExhausted", async () => {
@@ -603,20 +613,78 @@ describe("runSpecPhase", () => {
 
     const { run } = makeScriptedRunCommand([]);
 
-    await expect(
-      runSpecPhase(
-        { ticket: TICKET },
-        makeBaseDeps({
-          agentClient: client,
-          runCommand: run,
-          linearClient,
-          resolveRepoPath: () => repoPath,
-        }),
-      ),
-    ).rejects.toMatchObject({ type: SPEC_FAILURE_TYPES.acClarificationRequested });
+    const result = await runSpecPhase(
+      { ticket: TICKET },
+      makeBaseDeps({
+        agentClient: client,
+        runCommand: run,
+        linearClient,
+        resolveRepoPath: () => repoPath,
+      }),
+    );
+
+    expect(result.kind).toBe("awaiting_clarification");
 
     const written = await listAllFilesRelative(repoPath);
     expect(written).toEqual([]);
+  });
+
+  it("priorClarifications: spec phase re-invocation threads answers into the system prompt", async () => {
+    const decisions: SpecAgentDecision[] = [
+      {
+        type: "propose_failing_tests",
+        input: {
+          files: [
+            {
+              path: "tests/feature-x.test.ts",
+              contents: "test('x', () => { throw new Error('not yet'); });\n",
+              description: "covers feature X",
+            },
+          ],
+          implementationPlan: validImplementationPlan,
+        },
+      },
+    ];
+    const { client, opts } = makeStubAgentClient(decisions);
+
+    const { run } = makeScriptedRunCommand([
+      { match: (c, a) => c === "npm" && a[0] === "test", result: fail("AssertionError") },
+      { match: (c, a) => c === "git" && a[0] === "symbolic-ref", result: ok("origin/main\n") },
+      { match: (c, a) => c === "git" && a[0] === "checkout", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "add", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "commit", result: ok() },
+      { match: (c, a) => c === "git" && a[0] === "rev-parse", result: ok(`${"a".repeat(40)}\n`) },
+      { match: (c, a) => c === "git" && a[0] === "push", result: ok() },
+    ]);
+
+    const result = await runSpecPhase(
+      {
+        ticket: TICKET,
+        priorClarifications: [
+          {
+            reason: "AC §2 doesn't say what 'merge' means",
+            questions: ["What does merge mean here?"],
+            answer: "Use INSERT ... ON CONFLICT DO UPDATE.",
+            resolvedBy: "alice@example.com",
+          },
+        ],
+      },
+      makeBaseDeps({
+        agentClient: client,
+        runCommand: run,
+        resolveRepoPath: () => repoPath,
+        loadPrompt: async () => "ticket={{TICKET_IDENTIFIER}}\n{{CLARIFICATION_HISTORY}}",
+      }),
+    );
+
+    expect(result.kind).toBe("done");
+    expect(opts).toHaveLength(1);
+    const systemPrompt = opts[0].systemPrompt;
+    expect(systemPrompt).toMatch(/Prior clarifications/);
+    expect(systemPrompt).toMatch(/AC §2 doesn't say what 'merge' means/);
+    expect(systemPrompt).toMatch(/What does merge mean here\?/);
+    expect(systemPrompt).toMatch(/INSERT \.\.\. ON CONFLICT DO UPDATE\./);
+    expect(systemPrompt).toMatch(/resolved by alice@example\.com/);
   });
 
 });

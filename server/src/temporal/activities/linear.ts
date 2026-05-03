@@ -32,6 +32,33 @@ export async function syncLinearTicketStateActivity(input: SyncLinearTicketState
   await client.updateIssueState(input.ticketId, stateId);
 }
 
+export interface ResolveClarificationSubTicketInput {
+  subTicketId: string;
+  answer: string;
+  resolvedBy?: string;
+}
+
+// Post the operator's clarification answer onto the Linear sub-ticket and
+// transition the sub-ticket to Done so Linear stays consistent with the
+// workflow state. Failures bubble up so Temporal can retry; the caller
+// (per-ticket workflow) treats this as best-effort and re-dispatches the
+// spec phase regardless.
+export async function resolveClarificationSubTicketActivity(
+  input: ResolveClarificationSubTicketInput,
+): Promise<void> {
+  const client = createLinearClient();
+  const body = formatClarificationAnswerComment(input.answer, input.resolvedBy);
+  await client.postComment(input.subTicketId, body);
+  const doneStateId = getStateIdForName("Done");
+  await client.updateIssueState(input.subTicketId, doneStateId);
+}
+
+export function formatClarificationAnswerComment(answer: string, resolvedBy?: string): string {
+  const trimmed = answer.trim();
+  const author = resolvedBy && resolvedBy.trim().length > 0 ? resolvedBy.trim() : "operator";
+  return `## Clarification answered by ${author}\n\n${trimmed}\n`;
+}
+
 function getStateIdForName(stateName: LinearTicketStateName): string {
   switch (stateName) {
     case "In Progress":
