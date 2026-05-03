@@ -3,12 +3,16 @@ import { Router } from "express";
 import request from "supertest";
 import { createApp } from "../../src/app.js";
 
-function appWithThrowRoute(error: Error | (Error & { status: number })) {
+async function appWithThrowRoute(error: Error | (Error & { status: number })) {
   const router = Router();
   router.get("/", () => {
     throw error;
   });
-  return createApp({ extraRouters: [{ path: "/__test/throw", router }] });
+  return createApp({
+    extraRouters: [{ path: "/__test/throw", router }],
+    skipTicketActivityRouter: true,
+    skipUi: true,
+  });
 }
 
 describe("error handler", () => {
@@ -26,7 +30,7 @@ describe("error handler", () => {
 
   it("returns 500 with message and stack when NODE_ENV is unset", async () => {
     delete process.env.NODE_ENV;
-    const app = appWithThrowRoute(new Error("boom"));
+    const app = await appWithThrowRoute(new Error("boom"));
     const res = await request(app).get("/__test/throw");
     expect(res.status).toBe(500);
     expect(res.headers["content-type"]).toMatch(/application\/json/);
@@ -37,7 +41,7 @@ describe("error handler", () => {
 
   it("omits stack when NODE_ENV=production but keeps message", async () => {
     process.env.NODE_ENV = "production";
-    const app = appWithThrowRoute(new Error("boom"));
+    const app = await appWithThrowRoute(new Error("boom"));
     const res = await request(app).get("/__test/throw");
     expect(res.status).toBe(500);
     expect(res.body.error.message).toBe("boom");
@@ -47,7 +51,7 @@ describe("error handler", () => {
   it("honors err.status in the 400..599 range", async () => {
     delete process.env.NODE_ENV;
     const teapot = Object.assign(new Error("I'm a teapot"), { status: 418 });
-    const app = appWithThrowRoute(teapot);
+    const app = await appWithThrowRoute(teapot);
     const res = await request(app).get("/__test/throw");
     expect(res.status).toBe(418);
     expect(res.body.error.message).toBe("I'm a teapot");

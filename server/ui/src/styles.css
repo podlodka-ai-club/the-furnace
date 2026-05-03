@@ -1,0 +1,315 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  color: #e6e6e6;
+  background: #0d1117;
+}
+
+a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  grid-template-rows: 48px 1fr;
+  height: 100%;
+}
+
+.app-header {
+  grid-column: 1 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid #21262d;
+  background: #161b22;
+}
+
+.app-header__title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.app-header__filters {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.filter-button {
+  border: 1px solid #30363d;
+  background: transparent;
+  color: #c9d1d9;
+  border-radius: 4px;
+  padding: 4px 10px;
+}
+
+.filter-button.is-active {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+.icon-button {
+  border: 1px solid #30363d;
+  background: transparent;
+  color: #c9d1d9;
+  border-radius: 4px;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.workflow-list {
+  border-right: 1px solid #21262d;
+  overflow-y: auto;
+  background: #0d1117;
+}
+
+.workflow-list__item {
+  padding: 10px 16px;
+  border-bottom: 1px solid #161b22;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.workflow-list__item:hover {
+  background: #161b22;
+}
+
+.workflow-list__item.is-selected {
+  background: #1c2128;
+  border-left: 3px solid #1f6feb;
+  padding-left: 13px;
+}
+
+.workflow-list__title {
+  font-weight: 600;
+  color: #e6e6e6;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.workflow-list__meta {
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.workflow-detail {
+  overflow-y: auto;
+  padding: 16px 24px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.detail-header h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0 20px;
+}
+
+.detail-grid__label {
+  color: #8b949e;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-grid__value {
+  color: #e6e6e6;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.section {
+  margin-bottom: 24px;
+}
+
+.section h2 {
+  font-size: 14px;
+  margin: 0 0 8px;
+  color: #c9d1d9;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timeline__item {
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border-left: 3px solid #30363d;
+  background: #161b22;
+}
+
+.timeline__item.status-running {
+  border-left-color: #1f6feb;
+}
+.timeline__item.status-completed {
+  border-left-color: #3fb950;
+}
+.timeline__item.status-failed {
+  border-left-color: #f85149;
+}
+.timeline__item.status-cancelled {
+  border-left-color: #d29922;
+}
+.timeline__item.status-pending {
+  border-left-color: #6e7681;
+}
+
+.timeline__time {
+  color: #8b949e;
+  font-size: 12px;
+  flex-shrink: 0;
+  width: 90px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline__label {
+  flex: 1;
+  color: #e6e6e6;
+}
+
+.timeline__status {
+  color: #8b949e;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.review-round {
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #161b22;
+}
+
+.review-round__header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.review-round__verdict {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.verdict-approve {
+  background: #196c2e;
+  color: #fff;
+}
+.verdict-changes_requested {
+  background: #9e6a03;
+  color: #fff;
+}
+
+.human-pause {
+  border: 1px solid #f85149;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: rgba(248, 81, 73, 0.08);
+}
+
+.human-pause__type {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: #f85149;
+  margin-bottom: 4px;
+}
+
+.empty-state,
+.error-state,
+.loading-state {
+  padding: 32px;
+  text-align: center;
+  color: #8b949e;
+}
+
+.error-state {
+  color: #f85149;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.status-pill.status-running {
+  background: #1f6feb;
+  color: #fff;
+}
+.status-pill.status-completed {
+  background: #196c2e;
+  color: #fff;
+}
+.status-pill.status-failed {
+  background: #b62324;
+  color: #fff;
+}
+.status-pill.status-cancelled {
+  background: #6e7681;
+  color: #fff;
+}
+.status-pill.status-terminated,
+.status-pill.status-timed_out {
+  background: #9e6a03;
+  color: #fff;
+}
+.status-pill.status-unknown {
+  background: #30363d;
+  color: #c9d1d9;
+}

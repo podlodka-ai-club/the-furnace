@@ -9,7 +9,10 @@
     "temporal:worker": "tsx --env-file=.env src/temporal/worker.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:container-as-worker:e2e": "tsx scripts/test-container-as-worker-e2e.ts"
+    "test:container-as-worker:e2e": "tsx scripts/test-container-as-worker-e2e.ts",
+    "ui:build": "vite build",
+    "ui:dev": "vite",
+    "ui:typecheck": "tsc -p tsconfig.ui.json --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
@@ -21,15 +24,27 @@
     "@temporalio/workflow": "^1.16.1",
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "lucide-react": "^1.14.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/supertest": "^6.0.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "happy-dom": "^20.9.0",
+    "jsdom": "^29.1.1",
     "supertest": "^7.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
+    "vite": "^6.4.2",
     "vitest": "^3.0.0"
   }
 }
